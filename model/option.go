@@ -1,6 +1,7 @@
 package model
 
 import (
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -513,8 +514,16 @@ func updateOptionMap(key string, value string) (err error) {
 	case "Footer":
 		common.Footer = value
 	case "SystemName":
+		if systemName := strings.TrimSpace(os.Getenv("SYSTEM_NAME")); systemName != "" {
+			value = systemName
+			common.OptionMap[key] = value
+		}
 		common.SystemName = value
 	case "Logo":
+		if systemLogo := strings.TrimSpace(os.Getenv("SYSTEM_LOGO")); systemLogo != "" {
+			value = systemLogo
+			common.OptionMap[key] = value
+		}
 		common.Logo = value
 	case "WeChatServerAddress":
 		common.WeChatServerAddress = value

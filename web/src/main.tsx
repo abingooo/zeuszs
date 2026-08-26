@@ -34,6 +34,7 @@ import { applyFaviconToDom } from '@/lib/dom-utils'
 import '@/lib/dayjs'
 import { initializeFrontendCache } from '@/lib/frontend-cache'
 import { handleServerError } from '@/lib/handle-server-error'
+import { getLocalizedSystemName } from '@/lib/system-name'
 
 import { DirectionProvider } from './context/direction-provider'
 import { FontProvider } from './context/font-provider'
@@ -117,19 +118,24 @@ if (!rootElement) {
 ;(function initSystemBranding() {
   try {
     if (typeof window === 'undefined' || typeof document === 'undefined') return
-    const apply = (name: string) => {
-      document.title = name
+    const apply = (name: string, englishName?: string) => {
+      const localizedName = getLocalizedSystemName(
+        name,
+        englishName,
+        i18next.resolvedLanguage || i18next.language
+      )
+      document.title = localizedName
       const metaTitle = document.querySelector(
         'meta[name="title"]'
       ) as HTMLMetaElement | null
-      if (metaTitle) metaTitle.setAttribute('content', name)
+      if (metaTitle) metaTitle.setAttribute('content', localizedName)
     }
     // Cache-first
     try {
       const saved = localStorage.getItem('status')
       if (saved) {
         const s = JSON.parse(saved)
-        if (s?.system_name) apply(s.system_name)
+        if (s?.system_name) apply(s.system_name, s.system_name_en)
         if (s?.logo) applyFaviconToDom(s.logo)
       }
     } catch {
@@ -139,7 +145,7 @@ if (!rootElement) {
     getStatus()
       .then((s) => {
         if (s?.system_name) {
-          apply(s.system_name as string)
+          apply(s.system_name as string, s.system_name_en as string | undefined)
           try {
             localStorage.setItem('status', JSON.stringify(s))
           } catch {

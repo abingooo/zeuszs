@@ -16,13 +16,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { describe, expect, test } from 'vitest'
 
-export const Route = createFileRoute('/_authenticated/playground/')({
-  beforeLoad: () => {
-    throw redirect({
-      to: '/dashboard/$section',
-      params: { section: 'overview' },
-    })
-  },
+import { getLocalizedSystemName } from '../system-name'
+
+describe('localized system name', () => {
+  test('uses the deployment English name for English locales', () => {
+    expect(getLocalizedSystemName('宙斯智算', ' ZEUSZS ', 'en-US')).toBe(
+      'ZEUSZS'
+    )
+  })
+
+  test('keeps the default deployment name for non-English locales', () => {
+    expect(getLocalizedSystemName('宙斯智算', 'ZEUSZS', 'zh-CN')).toBe(
+      '宙斯智算'
+    )
+  })
+
+  test('falls back to the default name when no English name is configured', () => {
+    expect(getLocalizedSystemName('New API', '', 'en')).toBe('New API')
+  })
 })

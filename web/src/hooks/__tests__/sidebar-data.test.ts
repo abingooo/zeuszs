@@ -16,13 +16,25 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute, redirect } from '@tanstack/react-router'
+import { renderHook } from '@testing-library/react'
+import { describe, expect, test } from 'vitest'
 
-export const Route = createFileRoute('/_authenticated/playground/')({
-  beforeLoad: () => {
-    throw redirect({
-      to: '/dashboard/$section',
-      params: { section: 'overview' },
-    })
-  },
+import { useSidebarData } from '../use-sidebar-data'
+
+describe('sidebar data', () => {
+  test('does not expose playground or chat navigation', () => {
+    const { result } = renderHook(() => useSidebarData())
+
+    expect(result.current.navGroups.some((group) => group.id === 'chat')).toBe(
+      false
+    )
+    expect(
+      result.current.navGroups
+        .flatMap((group) => group.items)
+        .some((item) => {
+          if ('type' in item && item.type === 'chat-presets') return true
+          return 'url' in item && item.url === '/playground'
+        })
+    ).toBe(false)
+  })
 })

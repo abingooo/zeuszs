@@ -27,6 +27,7 @@ services:
       - ./logs:/app/logs
     environment:
       - SYSTEM_NAME=宙斯智算
+      - SYSTEM_NAME_EN=ZEUSZS
       - SYSTEM_LOGO=/zeuszs-logo.png
       - SQL_DSN=postgresql://root:123456@postgres:5432/new-api # ⚠️ IMPORTANT: Change the password in production!
 #      - SQL_DSN=root:123456@tcp(mysql:3306)/new-api  # Point to the mysql service, uncomment if using MySQL

@@ -16,13 +16,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute, redirect } from '@tanstack/react-router'
-
-export const Route = createFileRoute('/_authenticated/playground/')({
-  beforeLoad: () => {
-    throw redirect({
-      to: '/dashboard/$section',
-      params: { section: 'overview' },
-    })
-  },
-})
+export function getLocalizedSystemName(
+  defaultName: string,
+  englishName: string | undefined,
+  language: string | undefined
+): string {
+  if (language?.toLowerCase().startsWith('en') && englishName?.trim()) {
+    return englishName.trim()
+  }
+  return defaultName
+}

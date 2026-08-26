@@ -32,7 +32,10 @@ vi.mock('@/hooks/use-status', () => ({
 }))
 
 vi.mock('@/hooks/use-system-config', () => ({
-  useSystemConfig: () => ({ logo: '/wide-logo.png' }),
+  useSystemConfig: () => ({
+    logo: '/wide-logo.png',
+    systemName: 'Deployment',
+  }),
 }))
 
 describe('brand logo layout', () => {
@@ -45,13 +48,7 @@ describe('brand logo layout', () => {
   })
 
   test('keeps a wide deployment logo fully visible in the public header', () => {
-    render(
-      <HeaderLogo
-        src='/wide-logo.png'
-        loading={false}
-        logoLoaded
-      />
-    )
+    render(<HeaderLogo src='/wide-logo.png' loading={false} logoLoaded />)
 
     expect(screen.getByRole('img', { name: 'logo' })).toHaveClass(
       'object-contain'

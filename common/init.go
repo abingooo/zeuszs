@@ -39,6 +39,7 @@ func InitEnv() {
 	if systemName := strings.TrimSpace(os.Getenv("SYSTEM_NAME")); systemName != "" {
 		SystemName = systemName
 	}
+	SystemNameEnglish = strings.TrimSpace(os.Getenv("SYSTEM_NAME_EN"))
 	if systemLogo := strings.TrimSpace(os.Getenv("SYSTEM_LOGO")); systemLogo != "" {
 		Logo = systemLogo
 	}

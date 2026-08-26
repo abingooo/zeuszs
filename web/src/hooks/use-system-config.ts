@@ -17,9 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useEffect, useCallback } from 'react'
+import { useTranslation } from 'react-i18next'
 
 import { DEFAULT_SYSTEM_NAME, DEFAULT_LOGO } from '@/lib/constants'
 import { applyFaviconToDom } from '@/lib/dom-utils'
+import { getLocalizedSystemName } from '@/lib/system-name'
 import {
   useSystemConfigStore,
   type CurrencyConfig,
@@ -37,6 +39,7 @@ interface StatusApiResponse {
   success: boolean
   data: {
     system_name?: string
+    system_name_en?: string
     logo?: string
     footer_html?: string
     demo_site_enabled?: boolean
@@ -94,6 +97,7 @@ export function mapStatusDataToConfig(
 
   return {
     systemName: data.system_name || DEFAULT_SYSTEM_NAME,
+    systemNameEnglish: data.system_name_en?.trim() || undefined,
     logo: data.logo || DEFAULT_LOGO,
     footerHtml: data.footer_html,
     demoSiteEnabled: data.demo_site_enabled,
@@ -143,6 +147,7 @@ function preloadImage(
  */
 export function useSystemConfig(options: UseSystemConfigOptions = {}) {
   const { autoLoad = false } = options
+  const { i18n } = useTranslation()
   const {
     config,
     loading,
@@ -169,6 +174,20 @@ export function useSystemConfig(options: UseSystemConfigOptions = {}) {
   useEffect(() => {
     if (autoLoad) loadConfig()
   }, [autoLoad, loadConfig])
+
+  const systemName = getLocalizedSystemName(
+    config.systemName,
+    config.systemNameEnglish,
+    i18n.resolvedLanguage || i18n.language
+  )
+
+  useEffect(() => {
+    if (!autoLoad || typeof document === 'undefined') return
+    document.title = systemName
+    const metaTitle =
+      document.querySelector<HTMLMetaElement>('meta[name="title"]')
+    metaTitle?.setAttribute('content', systemName)
+  }, [autoLoad, systemName])
 
   // Preload logo image when URL changes
   useEffect(() => {
@@ -198,6 +217,7 @@ export function useSystemConfig(options: UseSystemConfigOptions = {}) {
 
   return {
     ...config,
+    systemName,
     loading,
     logoLoaded: config.logo === loadedLogoUrl && !!loadedLogoUrl,
   }

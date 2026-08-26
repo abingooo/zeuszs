@@ -84,7 +84,6 @@ const SETUP_GUIDE_CODE_PATTERN = [
 type DashboardActionPath =
   | '/keys'
   | '/wallet'
-  | '/playground'
   | '/channels'
   | '/usage-logs'
   | '/pricing'
@@ -514,10 +513,10 @@ export function OverviewDashboard() {
         completed: remainQuota > 0 || usedQuota > 0,
       },
       {
-        title: t('Send a request'),
-        description: t('Verify routing with Playground or your client'),
-        to: '/playground',
-        icon: TerminalSquare,
+        title: t('Usage Logs'),
+        description: t('Inspect requests, errors, and billing details'),
+        to: '/usage-logs',
+        icon: FileText,
         completed: requestCount > 0,
       },
     ],

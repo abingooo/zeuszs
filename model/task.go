@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"database/sql/driver"
 	"encoding/json"
+	"errors"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	commonRelay "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"gorm.io/gorm"
 )
 
 type TaskStatus string
@@ -46,27 +49,39 @@ const (
 const TaskRefundLegacyCutoff int64 = 1771718400 // 2026-02-22 00:00:00 UTC
 
 type Task struct {
-	ID         int64                 `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
-	CreatedAt  int64                 `json:"created_at" gorm:"index"`
-	UpdatedAt  int64                 `json:"updated_at"`
-	TaskID     string                `json:"task_id" gorm:"type:varchar(191);index"` // 第三方id，不一定有/ song id\ Task id
-	Platform   constant.TaskPlatform `json:"platform" gorm:"type:varchar(30);index"` // 平台
-	UserId     int                   `json:"user_id" gorm:"index"`
-	Group      string                `json:"group" gorm:"type:varchar(50)"` // 修正计费用
-	ChannelId  int                   `json:"channel_id" gorm:"index"`
-	Quota      int                   `json:"quota"`
-	Action     string                `json:"action" gorm:"type:varchar(40);index"` // 任务类型, song, lyrics, description-mode
-	Status     TaskStatus            `json:"status" gorm:"type:varchar(20);index"` // 任务状态
-	FailReason string                `json:"fail_reason"`
-	SubmitTime int64                 `json:"submit_time" gorm:"index"`
-	StartTime  int64                 `json:"start_time" gorm:"index"`
-	FinishTime int64                 `json:"finish_time" gorm:"index"`
-	Progress   string                `json:"progress" gorm:"type:varchar(20);index"`
-	Properties Properties            `json:"properties" gorm:"type:json"`
-	Username   string                `json:"username,omitempty" gorm:"-"`
+	ID              int64                 `json:"id" gorm:"primary_key;AUTO_INCREMENT"`
+	CreatedAt       int64                 `json:"created_at" gorm:"index"`
+	UpdatedAt       int64                 `json:"updated_at"`
+	TaskID          string                `json:"task_id" gorm:"type:varchar(191);index"` // 第三方id，不一定有/ song id\ Task id
+	Platform        constant.TaskPlatform `json:"platform" gorm:"type:varchar(30);index"` // 平台
+	UserId          int                   `json:"user_id" gorm:"index"`
+	OrganizationId  int                   `json:"organization_id" gorm:"index"`
+	ProjectId       *int                  `json:"project_id,omitempty" gorm:"index"`
+	Group           string                `json:"group" gorm:"type:varchar(50)"` // 修正计费用
+	ChannelId       int                   `json:"channel_id" gorm:"index"`
+	Quota           int                   `json:"quota"`
+	BillingRevision int64                 `json:"-" gorm:"type:bigint;not null;default:0"`
+	// LegacyOrganizationWallet is set only by the organization migration for
+	// tasks whose wallet charge predates durable organization reservations.
+	LegacyOrganizationWallet bool       `json:"-"`
+	Action                   string     `json:"action" gorm:"type:varchar(40);index"` // 任务类型, song, lyrics, description-mode
+	Status                   TaskStatus `json:"status" gorm:"type:varchar(20);index"` // 任务状态
+	FailReason               string     `json:"fail_reason"`
+	SubmitTime               int64      `json:"submit_time" gorm:"index"`
+	StartTime                int64      `json:"start_time" gorm:"index"`
+	FinishTime               int64      `json:"finish_time" gorm:"index"`
+	Progress                 string     `json:"progress" gorm:"type:varchar(20);index"`
+	Properties               Properties `json:"properties" gorm:"type:json"`
+	Username                 string     `json:"username,omitempty" gorm:"-"`
 	// 禁止返回给用户，内部可能包含key等隐私信息
 	PrivateData TaskPrivateData `json:"-" gorm:"column:private_data;type:json"`
 	Data        json.RawMessage `json:"data" gorm:"type:json"`
+}
+
+// BeforeCreate snapshots the authoritative organization from the owning user.
+// A caller-supplied organization_id is deliberately overwritten.
+func (t *Task) BeforeCreate(tx *gorm.DB) error {
+	return overwriteOrganizationSnapshot(tx, t.UserId, &t.OrganizationId)
 }
 
 func (t *Task) SetData(data any) {
@@ -105,11 +120,12 @@ type TaskPrivateData struct {
 	UpstreamTaskID string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
 	ResultURL      string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
-	BillingSource  string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
-	SubscriptionId int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
-	TokenId        int                 `json:"token_id,omitempty"`        // 令牌 ID，用于令牌额度退款
-	NodeName       string              `json:"node_name,omitempty"`       // 发起任务的节点名，轮询结算阶段据此归属日志而非最后查询节点
-	BillingContext *TaskBillingContext `json:"billing_context,omitempty"` // 计费参数快照（用于轮询阶段重新计算）
+	BillingSource             string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
+	SubscriptionId            int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
+	OrganizationReservationId int64               `json:"organization_reservation_id,omitempty"`
+	TokenId                   int                 `json:"token_id,omitempty"`        // 令牌 ID，用于令牌额度退款
+	NodeName                  string              `json:"node_name,omitempty"`       // 发起任务的节点名，轮询结算阶段据此归属日志而非最后查询节点
+	BillingContext            *TaskBillingContext `json:"billing_context,omitempty"` // 计费参数快照（用于轮询阶段重新计算）
 }
 
 // TaskBillingContext 记录任务提交时的计费参数，以便轮询阶段可以重新计算额度。
@@ -409,6 +425,262 @@ func (Task *Task) Update() error {
 
 func (t *Task) UpdateQuota() error {
 	return DB.Model(t).Update("quota", t.Quota).Error
+}
+
+// AdvanceBillingQuota persists one organization billing transition. The
+// revision makes a repeated quota cycle a distinct operation while the CAS
+// ensures concurrent pollers cannot both apply token and usage side effects.
+func (t *Task) AdvanceBillingQuota(expectedQuota int, expectedRevision int64, quota int) (bool, error) {
+	return t.advanceBillingQuotaTx(DB, expectedQuota, expectedRevision, quota, false)
+}
+
+type OrganizationTaskBillingMutationParams struct {
+	TaskId                    int64
+	UserId                    int
+	OrganizationId            int
+	OrganizationReservationId int64
+	LegacyOrganizationWallet  bool
+	TokenId                   int
+	ChannelId                 int
+	ExpectedQuota             int
+	ExpectedRevision          int64
+	ActualQuota               int
+	OperationId               string
+}
+
+type OrganizationTaskBillingMutationResult struct {
+	Applied    bool
+	QuotaDelta int
+	QuotaClamp *common.QuotaClamp
+}
+
+var errOrganizationTaskBillingStale = errors.New("organization task billing state changed")
+
+// ApplyOrganizationTaskBillingMutation commits the authoritative task billing
+// state in one main-database transaction. Redis and logs are projections and
+// are deliberately updated only after this function commits.
+func ApplyOrganizationTaskBillingMutation(params OrganizationTaskBillingMutationParams) (OrganizationTaskBillingMutationResult, error) {
+	hasReservation := params.OrganizationReservationId > 0
+	if DB == nil || params.TaskId <= 0 || params.UserId <= 0 || params.OrganizationId <= 0 ||
+		params.OrganizationReservationId < 0 || params.TokenId < 0 || params.ChannelId < 0 ||
+		params.ExpectedQuota <= 0 || params.ExpectedQuota >= common.MaxQuota || params.ExpectedRevision < 0 ||
+		params.ActualQuota < 0 || params.ActualQuota >= common.MaxQuota || params.ActualQuota == params.ExpectedQuota ||
+		strings.TrimSpace(params.OperationId) == "" || len(params.OperationId) > 64 ||
+		hasReservation == params.LegacyOrganizationWallet {
+		return OrganizationTaskBillingMutationResult{}, ErrOrganizationAccountingInvalid
+	}
+
+	quotaDelta := params.ActualQuota - params.ExpectedQuota
+	result := OrganizationTaskBillingMutationResult{QuotaDelta: quotaDelta}
+	walletDelta := int64(0)
+	walletProjectionNeeded := false
+	tokenKey := ""
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		fundingAlreadyApplied := false
+		actor := OrganizationAccountingActor{
+			Kind:   OrganizationAccountingActorSystem,
+			Policy: "async_task_billing",
+		}
+		if hasReservation {
+			if params.ActualQuota == 0 {
+				refunded, delta, err := refundOrganizationWalletQuotaTx(tx, OrganizationWalletRefundParams{
+					ReservationId:  params.OrganizationReservationId,
+					IdempotencyKey: params.OperationId,
+					RequestId:      params.OperationId,
+					Actor:          actor,
+				})
+				if err != nil {
+					return err
+				}
+				if refunded.Reservation.OrganizationId != params.OrganizationId || refunded.Reservation.UserId != params.UserId {
+					return ErrOrganizationIdentityInvalid
+				}
+				if refunded.Reservation.ReservedQuota != int64(params.ExpectedQuota) {
+					return ErrOrganizationReservationState
+				}
+				walletDelta = delta
+				fundingAlreadyApplied = refunded.Accounting.AlreadyApplied
+			} else {
+				expectedQuota := int64(params.ExpectedQuota)
+				adjusted, delta, err := applyOrganizationWalletQuotaTargetTx(
+					tx,
+					OrganizationWalletSettleParams{
+						ReservationId:  params.OrganizationReservationId,
+						ActualQuota:    int64(params.ActualQuota),
+						IdempotencyKey: params.OperationId,
+						RequestId:      params.OperationId,
+						Actor:          actor,
+					},
+					&expectedQuota,
+					OrganizationWalletReservationSettled,
+					OrganizationLedgerAdjust,
+					"organization.wallet.adjust",
+				)
+				if err != nil {
+					return err
+				}
+				if adjusted.Reservation.OrganizationId != params.OrganizationId || adjusted.Reservation.UserId != params.UserId {
+					return ErrOrganizationIdentityInvalid
+				}
+				walletDelta = delta
+				fundingAlreadyApplied = adjusted.Accounting.AlreadyApplied
+			}
+		} else {
+			funding, err := adjustLegacyOrganizationTaskWalletFundingTx(tx, LegacyOrganizationTaskWalletParams{
+				TaskId: params.TaskId, UserId: params.UserId, OrganizationId: params.OrganizationId,
+				ExpectedQuota: params.ExpectedQuota, ExpectedRevision: params.ExpectedRevision,
+				ActualQuota: params.ActualQuota, OperationId: params.OperationId,
+			})
+			if err != nil {
+				return err
+			}
+			walletDelta = funding.WalletDelta
+			fundingAlreadyApplied = funding.AlreadyApplied
+		}
+
+		// The funding state machine normally holds this row already. Re-lock it
+		// on an idempotent replay so every path keeps user -> task -> token ->
+		// channel ordering and cannot invert a fresh accounting mutation.
+		var user User
+		if err := lockForUpdate(tx).
+			Select("id", "organization_id", "used_quota").
+			Where("id = ?", params.UserId).
+			First(&user).Error; err != nil {
+			return err
+		}
+		if user.OrganizationId != params.OrganizationId {
+			return ErrOrganizationIdentityInvalid
+		}
+
+		var task Task
+		if err := lockForUpdate(tx).Where("id = ?", params.TaskId).First(&task).Error; err != nil {
+			return err
+		}
+		if task.UserId != params.UserId || task.OrganizationId != params.OrganizationId ||
+			task.PrivateData.TokenId != params.TokenId || task.ChannelId != params.ChannelId ||
+			task.LegacyOrganizationWallet != params.LegacyOrganizationWallet ||
+			task.PrivateData.BillingSource == taskBillingSourceSubscription {
+			return ErrOrganizationIdentityInvalid
+		}
+		if hasReservation {
+			if task.PrivateData.OrganizationReservationId != params.OrganizationReservationId {
+				return ErrOrganizationIdentityInvalid
+			}
+		} else if task.PrivateData.OrganizationReservationId != 0 || !task.LegacyOrganizationWallet {
+			return ErrOrganizationIdentityInvalid
+		}
+
+		advanced, err := task.advanceBillingQuotaTx(tx, params.ExpectedQuota, params.ExpectedRevision, params.ActualQuota, params.LegacyOrganizationWallet)
+		if err != nil {
+			return err
+		}
+		if !advanced {
+			if fundingAlreadyApplied {
+				return nil
+			}
+			return errOrganizationTaskBillingStale
+		}
+		userUsedQuota, userQuotaClamp := common.SaturatingInt32CounterAddChecked(user.UsedQuota, quotaDelta)
+		result.QuotaClamp = userQuotaClamp
+
+		if params.TokenId > 0 {
+			var token Token
+			err := lockForUpdate(tx.Unscoped()).
+				Select("id", "key", "used_quota").
+				Where("id = ?", params.TokenId).
+				First(&token).Error
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			if err == nil {
+				tokenUsedQuota, tokenQuotaClamp := common.SaturatingInt32CounterAddChecked(token.UsedQuota, quotaDelta)
+				if result.QuotaClamp == nil {
+					result.QuotaClamp = tokenQuotaClamp
+				}
+				tokenUpdate := tx.Unscoped().Model(&Token{}).
+					Where("id = ?", token.Id).
+					Updates(map[string]interface{}{
+						"remain_quota":  gorm.Expr("remain_quota - ?", quotaDelta),
+						"used_quota":    tokenUsedQuota,
+						"accessed_time": common.GetTimestamp(),
+					})
+				if tokenUpdate.Error != nil {
+					return tokenUpdate.Error
+				}
+				if tokenUpdate.RowsAffected != 1 {
+					return gorm.ErrRecordNotFound
+				}
+				tokenKey = token.Key
+			}
+		}
+
+		userUsage := tx.Model(&User{}).
+			Where("id = ? AND organization_id = ?", params.UserId, params.OrganizationId).
+			Update("used_quota", userUsedQuota)
+		if userUsage.Error != nil {
+			return userUsage.Error
+		}
+		if params.ChannelId > 0 {
+			channelUsage := tx.Model(&Channel{}).
+				Where("id = ?", params.ChannelId).
+				Update("used_quota", gorm.Expr("used_quota + ?", quotaDelta))
+			if channelUsage.Error != nil {
+				return channelUsage.Error
+			}
+		}
+
+		walletProjectionNeeded = !fundingAlreadyApplied
+		result.Applied = true
+		return nil
+	})
+	if errors.Is(err, errOrganizationTaskBillingStale) {
+		return OrganizationTaskBillingMutationResult{QuotaDelta: quotaDelta}, nil
+	}
+	if err != nil {
+		return OrganizationTaskBillingMutationResult{}, err
+	}
+	if !result.Applied {
+		return result, nil
+	}
+	if walletProjectionNeeded {
+		syncOrganizationAccountingQuotaCache(params.UserId, walletDelta, OrganizationLedgerAdjust)
+	}
+	if tokenKey != "" && common.RedisEnabled {
+		_, cacheErr := cacheApplyTokenQuotaDelta(params.TokenId, tokenKey, int64(-quotaDelta))
+		if cacheErr != nil {
+			common.SysLog("failed to sync organization task token quota cache: " + cacheErr.Error())
+		}
+	}
+	return result, nil
+}
+
+func (t *Task) advanceBillingQuotaTx(tx *gorm.DB, expectedQuota int, expectedRevision int64, quota int, legacyOrganizationWalletOnly bool) (bool, error) {
+	if tx == nil || t == nil || t.ID <= 0 || expectedQuota < 0 || expectedRevision < 0 || quota < 0 || quota >= common.MaxQuota {
+		return false, ErrOrganizationAccountingInvalid
+	}
+	query := tx.Model(&Task{}).
+		Where("id = ? AND quota = ?", t.ID, expectedQuota).
+		Where("billing_revision = ? OR (billing_revision IS NULL AND ? = 0)", expectedRevision, expectedRevision)
+	if legacyOrganizationWalletOnly {
+		if t.UserId <= 0 || t.OrganizationId <= 0 || !t.LegacyOrganizationWallet {
+			return false, ErrOrganizationAccountingInvalid
+		}
+		query = query.Where("user_id = ? AND organization_id = ? AND legacy_organization_wallet = ?", t.UserId, t.OrganizationId, true)
+	}
+	result := query.
+		Updates(map[string]interface{}{
+			"quota":            quota,
+			"billing_revision": expectedRevision + 1,
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	if result.RowsAffected != 1 {
+		return false, nil
+	}
+	t.Quota = quota
+	t.BillingRevision = expectedRevision + 1
+	return true, nil
 }
 
 // UpdateWithStatus performs a conditional UPDATE guarded by fromStatus (CAS).

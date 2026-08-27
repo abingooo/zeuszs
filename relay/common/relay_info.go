@@ -81,10 +81,14 @@ type TokenCountMeta struct {
 }
 
 type RelayInfo struct {
-	TokenId           int
-	TokenKey          string
-	TokenGroup        string
-	UserId            int
+	TokenId    int
+	TokenKey   string
+	TokenGroup string
+	UserId     int
+	// OrganizationId is resolved by authentication middleware/user state. It
+	// is never accepted from a relay request and is used to select the
+	// tenant-aware wallet funding path.
+	OrganizationId    int
 	UsingGroup        string // 使用的分组，当auto跨分组重试时，会变动
 	UserGroup         string // 用户所在分组
 	TokenUnlimited    bool
@@ -505,12 +509,13 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		Request:         request,
 		ReasoningEffort: reasoningEffort,
 
-		RequestId:  reqId,
-		UserId:     common.GetContextKeyInt(c, constant.ContextKeyUserId),
-		UsingGroup: common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
-		UserGroup:  common.GetContextKeyString(c, constant.ContextKeyUserGroup),
-		UserQuota:  common.GetContextKeyInt(c, constant.ContextKeyUserQuota),
-		UserEmail:  common.GetContextKeyString(c, constant.ContextKeyUserEmail),
+		RequestId:      reqId,
+		UserId:         common.GetContextKeyInt(c, constant.ContextKeyUserId),
+		OrganizationId: common.GetContextKeyInt(c, constant.ContextKeyOrganizationId),
+		UsingGroup:     common.GetContextKeyString(c, constant.ContextKeyUsingGroup),
+		UserGroup:      common.GetContextKeyString(c, constant.ContextKeyUserGroup),
+		UserQuota:      common.GetContextKeyInt(c, constant.ContextKeyUserQuota),
+		UserEmail:      common.GetContextKeyString(c, constant.ContextKeyUserEmail),
 
 		OriginModelName: common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
 

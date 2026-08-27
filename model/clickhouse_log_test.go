@@ -83,11 +83,33 @@ func TestClickHouseLogCreateTableSQL(t *testing.T) {
 	assert.Contains(t, withoutTTL, "ENGINE = MergeTree()")
 	assert.Contains(t, withoutTTL, "PARTITION BY toYYYYMM(toDateTime(created_at))")
 	assert.Contains(t, withoutTTL, "ORDER BY (created_at, request_id)")
+	assert.Contains(t, withoutTTL, "organization_id Int32 DEFAULT 0")
+	assert.Contains(t, withoutTTL, "project_id Nullable(Int32) DEFAULT NULL")
+	assert.Contains(t, withoutTTL, "billing_event_id Nullable(String) DEFAULT NULL")
+	assert.Contains(t, withoutTTL, "billing_event_fingerprint Nullable(String) DEFAULT NULL")
 	assert.NotContains(t, withoutTTL, "TTL ")
 
 	withTTL := clickHouseLogCreateTableSQL(30)
 	assert.Contains(t, withTTL, "ORDER BY (created_at, request_id)")
 	assert.Contains(t, withTTL, "TTL toDateTime(created_at) + INTERVAL 30 DAY DELETE")
+}
+
+func TestClickHouseLogBillingEventMigrationSQL(t *testing.T) {
+	assert.Equal(t, []string{
+		"ALTER TABLE logs ADD COLUMN IF NOT EXISTS billing_event_id Nullable(String) DEFAULT NULL AFTER upstream_request_id",
+		"ALTER TABLE logs ADD COLUMN IF NOT EXISTS billing_event_fingerprint Nullable(String) DEFAULT NULL AFTER billing_event_id",
+	}, clickHouseLogBillingEventColumnsSQL())
+}
+
+func TestClickHouseLogOrganizationMigrationSQL(t *testing.T) {
+	assert.Equal(t, []string{
+		"ALTER TABLE logs ADD COLUMN IF NOT EXISTS organization_id Int32 DEFAULT 0 AFTER user_id",
+		"ALTER TABLE logs ADD COLUMN IF NOT EXISTS project_id Nullable(Int32) DEFAULT NULL AFTER organization_id",
+	}, clickHouseLogOrganizationColumnsSQL())
+	assert.Equal(t,
+		"ALTER TABLE logs UPDATE organization_id = ? WHERE organization_id = 0 AND user_id > 0",
+		clickHouseLogOrganizationBackfillSQL(),
+	)
 }
 
 func TestClickHouseCreateTableHasTTL(t *testing.T) {

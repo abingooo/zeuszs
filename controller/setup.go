@@ -1,13 +1,17 @@
 package controller
 
 import (
+	"errors"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type Setup struct {
@@ -53,9 +57,6 @@ func PostSetup(c *gin.Context) {
 		return
 	}
 
-	// Check if root user already exists
-	rootExists := model.RootUserExists()
-
 	var req SetupRequest
 	err := c.ShouldBindJSON(&req)
 	if err != nil {
@@ -66,7 +67,8 @@ func PostSetup(c *gin.Context) {
 		return
 	}
 
-	// If root doesn't exist, validate and create admin account
+	// Validate credentials when setup is responsible for creating the root.
+	rootExists := model.RootUserExists()
 	if !rootExists {
 		// Validate username length: max 12 characters to align with model.User validation
 		if len(req.Username) > 12 {
@@ -93,32 +95,52 @@ func PostSetup(c *gin.Context) {
 			return
 		}
 
-		// Create root user
-		hashedPassword, err := common.Password2Hash(req.Password)
+	}
+
+	// Root creation, default-organization provisioning, and the initial wallet
+	// grant must commit or roll back together. Re-check the root inside the
+	// transaction so concurrent setup requests cannot create two tenants.
+	err = model.DB.Transaction(func(tx *gorm.DB) error {
+		var rootUser model.User
+		findErr := tx.Where("role = ?", common.RoleRootUser).First(&rootUser).Error
+		if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
+			return findErr
+		}
+		if errors.Is(findErr, gorm.ErrRecordNotFound) {
+			rootUser = model.User{
+				Username:    req.Username,
+				Password:    req.Password,
+				Role:        common.RoleRootUser,
+				Status:      common.UserStatusEnabled,
+				DisplayName: "Root User",
+				AccessToken: nil,
+			}
+			if err := service.ProvisionRootUserWithTx(tx, &rootUser, 100000000, c.GetString(common.RequestIdKey)); err != nil {
+				return err
+			}
+			return nil
+		}
+
+		// A root may have been created by an older bootstrap path. Complete its
+		// tenant membership in place without changing the existing wallet.
+		organization, err := model.EnsureDefaultOrganizationForRootTx(tx, rootUser.Id)
 		if err != nil {
-			c.JSON(200, gin.H{
-				"success": false,
-				"message": "系统错误: " + err.Error(),
-			})
-			return
+			return err
 		}
-		rootUser := model.User{
-			Username:    req.Username,
-			Password:    hashedPassword,
-			Role:        common.RoleRootUser,
-			Status:      common.UserStatusEnabled,
-			DisplayName: "Root User",
-			AccessToken: nil,
-			Quota:       100000000,
-		}
-		err = model.DB.Create(&rootUser).Error
-		if err != nil {
-			c.JSON(200, gin.H{
-				"success": false,
-				"message": "创建管理员账号失败: " + err.Error(),
-			})
-			return
-		}
+		return tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "organization_id"}, {Name: "user_id"}},
+			DoNothing: true,
+		}).Create(&model.OrganizationMemberFund{
+			OrganizationId: organization.Id,
+			UserId:         rootUser.Id,
+		}).Error
+	})
+	if err != nil {
+		c.JSON(200, gin.H{
+			"success": false,
+			"message": "创建管理员账号失败: " + err.Error(),
+		})
+		return
 	}
 
 	// Set operation modes

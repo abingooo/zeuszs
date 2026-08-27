@@ -169,6 +169,9 @@ func TryReserveUserQuota(id int, quota int) (bool, error) {
 	if quota == 0 {
 		return true, nil
 	}
+	if err := requireLegacyUserQuotaMutation(id); err != nil {
+		return false, err
+	}
 	if !common.RedisEnabled {
 		return reserveUserQuotaDB(id, quota)
 	}

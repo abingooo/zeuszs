@@ -14,6 +14,8 @@ import (
 type Token struct {
 	Id                 int            `json:"id"`
 	UserId             int            `json:"user_id" gorm:"index"`
+	OrganizationId     int            `json:"organization_id" gorm:"index"`
+	ProjectId          *int           `json:"project_id,omitempty" gorm:"index"`
 	Key                string         `json:"key" gorm:"type:varchar(128);uniqueIndex"`
 	Status             int            `json:"status" gorm:"default:1"`
 	Name               string         `json:"name" gorm:"index" `
@@ -29,7 +31,15 @@ type Token struct {
 	Group              string         `json:"group" gorm:"default:''"`
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
 	AutoGroups         string         `json:"-" gorm:"type:text"`
+	CacheSchema        int            `json:"-" gorm:"-:all"`
 	DeletedAt          gorm.DeletedAt `gorm:"index"`
+}
+
+// BeforeCreate snapshots the authoritative organization from the token owner.
+// A caller-supplied organization_id is never trusted; this keeps dashboard,
+// admin-created, and other persistence paths consistent with relay isolation.
+func (token *Token) BeforeCreate(tx *gorm.DB) error {
+	return overwriteOrganizationSnapshot(tx, token.UserId, &token.OrganizationId)
 }
 
 func (token *Token) GetAutoGroups() ([]string, error) {
@@ -476,6 +486,32 @@ func GetTokenKeysByIds(ids []int, userId int) ([]Token, error) {
 		Where("user_id = ? AND id IN (?)", userId, ids).
 		Find(&tokens).Error
 	return tokens, err
+}
+
+// DisableUserOrganizationTokensTx disables every active API token belonging
+// to one user in one organization. Cache mutation fences are raised before the
+// database update so a concurrent token lookup cannot republish an enabled
+// snapshot after the transaction commits.
+func DisableUserOrganizationTokensTx(tx *gorm.DB, userId, organizationId int) (int64, error) {
+	if tx == nil || userId <= 0 || organizationId <= 0 {
+		return 0, errors.New("invalid organization token disable request")
+	}
+	var tokens []Token
+	if err := lockForUpdate(tx).
+		Where("user_id = ? AND organization_id = ?", userId, organizationId).
+		Find(&tokens).Error; err != nil {
+		return 0, err
+	}
+	if err := invalidateTokensCache(tokens); err != nil {
+		return 0, err
+	}
+	result := tx.Model(&Token{}).
+		Where("user_id = ? AND organization_id = ? AND status <> ?", userId, organizationId, common.TokenStatusDisabled).
+		Update("status", common.TokenStatusDisabled)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
 }
 
 // InvalidateUserTokensCache 清理指定用户所有令牌在 Redis 中的缓存，

@@ -23,3 +23,11 @@ func lockForUpdate(tx *gorm.DB) *gorm.DB {
 	}
 	return tx.Clauses(clause.Locking{Strength: "UPDATE"})
 }
+
+// LockForUpdate exposes the dialect-aware row-lock query builder to service
+// packages that own a transaction but must still use the shared locking
+// semantics. Callers should use it only for a query inside an active
+// transaction.
+func LockForUpdate(tx *gorm.DB) *gorm.DB {
+	return lockForUpdate(tx)
+}

@@ -24,15 +24,22 @@ import (
 
 func GetTopUpInfo(c *gin.Context) {
 	complianceConfirmed := operation_setting.IsPaymentComplianceConfirmed()
+	organizationPolicy, err := service.GetOrganizationTopupPolicyForUser(c.GetInt("id"))
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	onlineTopupAllowed := complianceConfirmed && organizationPolicy.Allowed
 
 	// 获取支付方式
-	payMethods := operation_setting.PayMethods
-	if !complianceConfirmed {
-		payMethods = []map[string]string{}
+	payMethods := make([]map[string]string, 0, len(operation_setting.PayMethods)+3)
+	if onlineTopupAllowed {
+		payMethods = append(payMethods, operation_setting.PayMethods...)
 	}
 
 	// 如果启用了 Stripe 支付，添加到支付方法列表
-	if isStripeTopUpEnabled() {
+	enableStripe := onlineTopupAllowed && isStripeTopUpEnabled()
+	if enableStripe {
 		// 检查是否已经包含 Stripe
 		hasStripe := false
 		for _, method := range payMethods {
@@ -54,7 +61,7 @@ func GetTopUpInfo(c *gin.Context) {
 	}
 
 	// Waffo Pancake is displayed above the standard Waffo gateway.
-	enableWaffoPancake := isWaffoPancakeTopUpEnabled()
+	enableWaffoPancake := onlineTopupAllowed && isWaffoPancakeTopUpEnabled()
 	if enableWaffoPancake {
 		hasWaffoPancake := false
 		for _, method := range payMethods {
@@ -75,7 +82,7 @@ func GetTopUpInfo(c *gin.Context) {
 	}
 
 	// 如果启用了 Waffo 支付，添加到支付方法列表
-	enableWaffo := isWaffoTopUpEnabled()
+	enableWaffo := onlineTopupAllowed && isWaffoTopUpEnabled()
 	if enableWaffo {
 		hasWaffo := false
 		for _, method := range payMethods {
@@ -96,10 +103,16 @@ func GetTopUpInfo(c *gin.Context) {
 		}
 	}
 
+	creemProducts := setting.CreemProducts
+	topupLink := common.TopUpLink
+	if !onlineTopupAllowed {
+		creemProducts = "[]"
+		topupLink = ""
+	}
 	data := gin.H{
-		"enable_online_topup":              isEpayTopUpEnabled(),
-		"enable_stripe_topup":              isStripeTopUpEnabled(),
-		"enable_creem_topup":               isCreemTopUpEnabled(),
+		"enable_online_topup":              onlineTopupAllowed && isEpayTopUpEnabled(),
+		"enable_stripe_topup":              enableStripe,
+		"enable_creem_topup":               onlineTopupAllowed && isCreemTopUpEnabled(),
 		"enable_waffo_topup":               enableWaffo,
 		"enable_waffo_pancake_topup":       enableWaffoPancake,
 		"enable_redemption":                complianceConfirmed,
@@ -111,15 +124,16 @@ func GetTopUpInfo(c *gin.Context) {
 			}
 			return nil
 		}(),
-		"creem_products":          setting.CreemProducts,
-		"pay_methods":             payMethods,
-		"min_topup":               operation_setting.MinTopUp,
-		"stripe_min_topup":        setting.StripeMinTopUp,
-		"waffo_min_topup":         setting.WaffoMinTopUp,
-		"waffo_pancake_min_topup": setting.WaffoPancakeMinTopUp,
-		"amount_options":          operation_setting.GetPaymentSetting().AmountOptions,
-		"discount":                operation_setting.GetPaymentSetting().AmountDiscount,
-		"topup_link":              common.TopUpLink,
+		"creem_products":            creemProducts,
+		"pay_methods":               payMethods,
+		"min_topup":                 operation_setting.MinTopUp,
+		"stripe_min_topup":          setting.StripeMinTopUp,
+		"waffo_min_topup":           setting.WaffoMinTopUp,
+		"waffo_pancake_min_topup":   setting.WaffoPancakeMinTopUp,
+		"amount_options":            operation_setting.GetPaymentSetting().AmountOptions,
+		"discount":                  operation_setting.GetPaymentSetting().AmountDiscount,
+		"topup_link":                topupLink,
+		"organization_topup_policy": organizationPolicy,
 	}
 	common.ApiSuccess(c, data)
 }

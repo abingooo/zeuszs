@@ -54,15 +54,9 @@ func CreateLoginSessionAtAuthVersion(userID int, expectedAuthVersion int64, logi
 }
 
 func createLoginSession(userID int, expectedAuthVersion int64, loginMethod, ip, userAgent string) (*AuthBundle, error) {
-	user, err := model.GetUserCache(userID)
+	user, err := loadDashboardUserForAuthentication(userID, expectedAuthVersion, true)
 	if err != nil {
 		return nil, err
-	}
-	if user.Status != common.UserStatusEnabled || user.AuthVersion <= 0 {
-		return nil, ErrLoginSessionInvalid
-	}
-	if expectedAuthVersion > 0 && user.AuthVersion != expectedAuthVersion {
-		return nil, ErrLoginSessionRevoked
 	}
 	now := time.Now().Unix()
 	activeCount, err := model.CountActiveUserSessions(userID, now)
@@ -103,6 +97,16 @@ func createLoginSession(userID int, expectedAuthVersion int64, loginMethod, ip, 
 	if err := model.CreateUserSession(session); err != nil {
 		return nil, err
 	}
+	identity := AuthIdentity{
+		UserID:          session.UserID,
+		SessionID:       session.SID,
+		UserAuthVersion: session.UserAuthVersion,
+		SessionVersion:  session.Version,
+	}
+	if _, _, err := validateLoginSession(identity, true); err != nil {
+		_, _ = model.RevokeUserSession(userID, session.SID, "organization_access_denied")
+		return nil, err
+	}
 	bundle, err := issueAuthBundle(session, session.SID+"."+refreshSecret, true)
 	if err != nil {
 		_, _ = model.RevokeUserSession(userID, session.SID, "token_issue_failed")
@@ -112,6 +116,17 @@ func createLoginSession(userID int, expectedAuthVersion int64, loginMethod, ip, 
 }
 
 func ValidateLoginSession(identity AuthIdentity) (*model.UserSession, *model.UserBase, error) {
+	return validateLoginSession(identity, false)
+}
+
+// ValidatePlatformLoginSession permits an enabled platform Admin/Root to
+// manage platform configuration regardless of tenant lifecycle or membership
+// state. Tenant and general-user routes must continue to use ValidateLoginSession.
+func ValidatePlatformLoginSession(identity AuthIdentity) (*model.UserSession, *model.UserBase, error) {
+	return validateLoginSession(identity, true)
+}
+
+func validateLoginSession(identity AuthIdentity, allowPlatformRecovery bool) (*model.UserSession, *model.UserBase, error) {
 	session, err := model.GetUserSessionCached(identity.SessionID)
 	if err != nil {
 		if errors.Is(err, model.ErrUserSessionInactive) {
@@ -123,14 +138,44 @@ func ValidateLoginSession(identity AuthIdentity) (*model.UserSession, *model.Use
 	if session.UserID != identity.UserID || session.Status != model.UserSessionStatusActive || session.RevokedAt != 0 || session.ExpiresAt <= now || session.Version != identity.SessionVersion || session.UserAuthVersion != identity.UserAuthVersion {
 		return nil, nil, ErrLoginSessionRevoked
 	}
-	user, err := model.GetUserCache(identity.UserID)
+	user, err := loadDashboardUserForAuthentication(identity.UserID, identity.UserAuthVersion, allowPlatformRecovery)
 	if err != nil {
 		return nil, nil, err
 	}
-	if user.Status != common.UserStatusEnabled || user.AuthVersion != identity.UserAuthVersion {
-		return nil, nil, ErrLoginSessionRevoked
-	}
 	return session, user, nil
+}
+
+// ValidateDashboardPATUser applies the same current user and organization
+// checks as browser-session authentication. The caller must pass the auth
+// version read with the PAT lookup so token rotation or a restrictive user
+// update cannot race a stale cache snapshot back into use.
+func ValidateDashboardPATUser(userID int, expectedAuthVersion int64, allowPlatformRecovery bool) (*model.UserBase, error) {
+	return loadDashboardUserForAuthentication(userID, expectedAuthVersion, allowPlatformRecovery)
+}
+
+func loadDashboardUserForAuthentication(userID int, expectedAuthVersion int64, allowPlatformRecovery bool) (*model.UserBase, error) {
+	if userID <= 0 {
+		return nil, ErrLoginSessionInvalid
+	}
+	user, err := model.GetUserCache(userID)
+	if err != nil {
+		return nil, err
+	}
+	if user.Status != common.UserStatusEnabled || user.AuthVersion <= 0 ||
+		(expectedAuthVersion > 0 && user.AuthVersion != expectedAuthVersion) {
+		return nil, ErrLoginSessionRevoked
+	}
+	if allowPlatformRecovery && isPlatformOrganizationRecoveryRole(user.Role) {
+		return user, nil
+	}
+	if _, err := ResolveOrganizationPrincipal(user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
+func isPlatformOrganizationRecoveryRole(role int) bool {
+	return role == common.RoleAdminUser || role == common.RoleRootUser
 }
 
 // ValidateSessionReference validates a server-side flow bound to an existing
@@ -216,16 +261,20 @@ func RefreshLoginSession(rawRefreshToken, expectedSID, ip, userAgent string) (*A
 	if session.Status != model.UserSessionStatusActive || session.RevokedAt != 0 || session.ExpiresAt <= time.Now().Unix() {
 		return nil, nil, ErrLoginSessionRevoked
 	}
-	userCache, err := model.GetUserCache(session.UserID)
+	userCache, err := loadDashboardUserForAuthentication(session.UserID, session.UserAuthVersion, true)
 	if err != nil {
+		if errors.Is(err, ErrLoginSessionRevoked) || errors.Is(err, ErrOrganizationIdentityInvalid) ||
+			errors.Is(err, ErrOrganizationInactive) || errors.Is(err, ErrOrganizationMembershipInactive) {
+			_, _ = model.RevokeUserSession(session.UserID, session.SID, "organization_access_denied")
+			return nil, nil, ErrLoginSessionRevoked
+		}
 		return nil, nil, err
 	}
 	currentUser, err := model.GetUserById(session.UserID, false)
 	if err != nil {
 		return nil, nil, err
 	}
-	if userCache.Status != common.UserStatusEnabled || userCache.AuthVersion != session.UserAuthVersion ||
-		currentUser.Status != common.UserStatusEnabled || currentUser.AuthVersion != session.UserAuthVersion {
+	if currentUser.Status != common.UserStatusEnabled || currentUser.AuthVersion != userCache.AuthVersion {
 		_, _ = model.RevokeUserSession(session.UserID, session.SID, "user_security_changed")
 		return nil, nil, ErrLoginSessionRevoked
 	}
@@ -234,6 +283,16 @@ func RefreshLoginSession(rawRefreshToken, expectedSID, ip, userAgent string) (*A
 	if err != nil {
 		if errors.Is(err, model.ErrUserSessionRefreshRace) && rotated != nil &&
 			hashRefreshSecret(nextSecret) == rotated.RefreshHash {
+			rotatedIdentity := AuthIdentity{
+				UserID:          rotated.UserID,
+				SessionID:       rotated.SID,
+				UserAuthVersion: rotated.UserAuthVersion,
+				SessionVersion:  rotated.Version,
+			}
+			if _, _, validateErr := validateLoginSession(rotatedIdentity, true); validateErr != nil {
+				_, _ = model.RevokeUserSession(rotated.UserID, rotated.SID, "organization_access_denied")
+				return nil, nil, ErrLoginSessionRevoked
+			}
 			bundle, issueErr := issueAuthBundle(rotated, sid+"."+nextSecret, true)
 			if issueErr != nil {
 				return nil, nil, issueErr
@@ -253,6 +312,16 @@ func RefreshLoginSession(rawRefreshToken, expectedSID, ip, userAgent string) (*A
 	}
 	rotated.IP = truncateAuthMetadata(ip, 64)
 	rotated.UserAgent = truncateAuthMetadata(userAgent, 512)
+	rotatedIdentity := AuthIdentity{
+		UserID:          rotated.UserID,
+		SessionID:       rotated.SID,
+		UserAuthVersion: rotated.UserAuthVersion,
+		SessionVersion:  rotated.Version,
+	}
+	if _, _, err := validateLoginSession(rotatedIdentity, true); err != nil {
+		_, _ = model.RevokeUserSession(rotated.UserID, rotated.SID, "organization_access_denied")
+		return nil, nil, ErrLoginSessionRevoked
+	}
 	bundle, err := issueAuthBundle(rotated, sid+"."+nextSecret, true)
 	if err != nil {
 		return nil, nil, err
@@ -398,6 +467,8 @@ func authSessionErrorCode(err error) (int, string) {
 	case errors.Is(err, ErrAuthTokenExpired):
 		return http.StatusUnauthorized, "AUTH_TOKEN_EXPIRED"
 	case errors.Is(err, ErrLoginSessionRevoked):
+		return http.StatusUnauthorized, "AUTH_SESSION_REVOKED"
+	case errors.Is(err, ErrOrganizationIdentityInvalid), errors.Is(err, ErrOrganizationInactive), errors.Is(err, ErrOrganizationMembershipInactive):
 		return http.StatusUnauthorized, "AUTH_SESSION_REVOKED"
 	case errors.Is(err, ErrRefreshTokenInvalid), errors.Is(err, ErrAuthTokenInvalid):
 		return http.StatusUnauthorized, "AUTH_UNAUTHORIZED"

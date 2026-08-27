@@ -52,6 +52,9 @@ export interface AuthUser {
   setting?: Record<string, unknown> | string
   stripe_customer?: string
   sidebar_modules?: string
+  organization_id?: number
+  organization_role?: 'owner' | 'admin' | 'member'
+  organization_status?: 'active' | 'disabled'
   permissions?: UserPermissions
 }
 

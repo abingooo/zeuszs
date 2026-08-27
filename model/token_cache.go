@@ -9,6 +9,8 @@ import (
 	"github.com/QuantumNous/new-api/common"
 )
 
+const tokenCacheSchemaVersion = 2
+
 func getTokenCacheKey(key string) string {
 	return fmt.Sprintf("token:%s", common.GenerateHMAC(key))
 }
@@ -66,7 +68,11 @@ if redis.call('EXISTS', KEYS[2]) == 1 then
   return 0
 end
 if redis.call('EXISTS', KEYS[1]) == 1 then
-  redis.call('EXPIRE', KEYS[1], ARGV[17])
+  local cache_schema = tonumber(redis.call('HGET', KEYS[1], 'CacheSchema') or '0')
+  if cache_schema ~= tonumber(ARGV[18]) then
+    redis.call('HSET', KEYS[1], 'OrganizationId', ARGV[17], 'CacheSchema', ARGV[18])
+  end
+  redis.call('EXPIRE', KEYS[1], ARGV[19])
   return 2
 end
 redis.call('HSET', KEYS[1],
@@ -74,8 +80,9 @@ redis.call('HSET', KEYS[1],
   'CreatedTime', ARGV[5], 'AccessedTime', ARGV[6], 'ExpiredTime', ARGV[7],
   'UnlimitedQuota', ARGV[8], 'ModelLimitsEnabled', ARGV[9], 'ModelLimits', ARGV[10],
   'AllowIps', ARGV[11], 'Group', ARGV[12], 'CrossGroupRetry', ARGV[13],
-  'AutoGroups', ARGV[14], 'RemainQuota', ARGV[15], 'UsedQuota', ARGV[16])
-redis.call('EXPIRE', KEYS[1], ARGV[17])
+  'AutoGroups', ARGV[14], 'RemainQuota', ARGV[15], 'UsedQuota', ARGV[16],
+  'OrganizationId', ARGV[17], 'CacheSchema', ARGV[18])
+redis.call('EXPIRE', KEYS[1], ARGV[19])
 return 1`
 
 	return common.RDB.Eval(context.Background(), script, []string{
@@ -86,6 +93,7 @@ return 1`
 		strconv.FormatBool(token.UnlimitedQuota), strconv.FormatBool(token.ModelLimitsEnabled),
 		token.ModelLimits, allowIps, token.Group, strconv.FormatBool(token.CrossGroupRetry),
 		token.AutoGroups, token.RemainQuota, token.UsedQuota,
+		token.OrganizationId, tokenCacheSchemaVersion,
 		tokenCacheTTLSeconds(),
 	).Int()
 }
@@ -99,7 +107,7 @@ func cacheGetTokenByKey(key string) (*Token, error) {
 	if err := common.RedisHGetObj(getTokenCacheKey(key), &token); err != nil {
 		return nil, err
 	}
-	if token.Id <= 0 {
+	if token.Id <= 0 || token.CacheSchema != tokenCacheSchemaVersion {
 		return nil, fmt.Errorf("token cache is incomplete")
 	}
 	token.Key = key

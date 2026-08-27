@@ -502,7 +502,7 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 			return nil, errors.New("已达到该套餐购买上限")
 		}
 	}
-	nowUnix := GetDBTimestamp()
+	nowUnix := getDBTimestamp(tx)
 	now := time.Unix(nowUnix, 0)
 	endUnix, err := calcPlanEndTime(now, plan)
 	if err != nil {
@@ -762,6 +762,7 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 	var logMoney float64
 	var chargedQuota int
 	var upgradeGroup string
+	var debitResult UserWalletDebitResult
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		plan, err := getSubscriptionPlanByIdTx(tx, planId)
 		if err != nil {
@@ -782,16 +783,26 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 			return err
 		}
 
-		var user User
-		if err := lockForUpdate(tx).Where("id = ?", userId).First(&user).Error; err != nil {
-			return err
-		}
-		if requiredQuota > 0 && user.Quota < requiredQuota {
-			return errors.New("余额不足")
-		}
+		now := common.GetTimestamp()
+		tradeNo := fmt.Sprintf("SUBBALUSR%dNO%s%d", userId, common.GetRandomString(6), time.Now().UnixNano())
 		if requiredQuota > 0 {
-			if err := tx.Model(&User{}).Where("id = ?", userId).
-				Update("quota", gorm.Expr("quota - ?", requiredQuota)).Error; err != nil {
+			var err error
+			debitResult, err = DebitUserWalletTx(tx, UserWalletDebitParams{
+				UserId:         userId,
+				Amount:         int64(requiredQuota),
+				SourceType:     "subscription_balance",
+				SourceId:       tradeNo,
+				IdempotencyKey: "subscription:" + tradeNo,
+				RequestId:      tradeNo,
+				Actor: OrganizationAccountingActor{
+					Kind:   OrganizationAccountingActorSystem,
+					Policy: "subscription_balance_purchase",
+				},
+			})
+			if errors.Is(err, ErrOrganizationUserQuotaInsufficient) {
+				return errors.New("余额不足")
+			}
+			if err != nil {
 				return err
 			}
 		}
@@ -801,8 +812,6 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 			return err
 		}
 
-		now := common.GetTimestamp()
-		tradeNo := fmt.Sprintf("SUBBALUSR%dNO%s%d", userId, common.GetRandomString(6), time.Now().UnixNano())
 		order := &SubscriptionOrder{
 			UserId:          userId,
 			PlanId:          plan.Id,
@@ -832,9 +841,7 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 	}
 
 	if chargedQuota > 0 {
-		if err := cacheDecrUserQuota(userId, int64(chargedQuota)); err != nil {
-			common.SysLog("failed to decrease user quota cache after subscription balance purchase: " + err.Error())
-		}
+		syncUserWalletDebitCache(userId, int64(chargedQuota), debitResult, "subscription balance purchase")
 	}
 	if upgradeGroup != "" {
 		refreshSubscriptionUserGroupCache(userId, "subscription balance purchase")

@@ -5,6 +5,7 @@ on:
     tags:
       - '*'
       - '!nightly*'
+      - '!zeuszs-*'
   workflow_dispatch:
     inputs:
       tag:

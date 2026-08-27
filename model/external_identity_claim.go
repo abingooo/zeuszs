@@ -10,7 +10,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const ExternalIdentityProviderTelegram = "telegram"
+const (
+	ExternalIdentityProviderTelegram = "telegram"
+	ExternalIdentityProviderWeChat   = "wechat"
+)
 
 var ErrExternalIdentityAlreadyClaimed = errors.New("external identity is already claimed")
 
@@ -83,19 +86,26 @@ func releaseAllExternalIdentitiesWithTx(tx *gorm.DB, userId int) error {
 	return tx.Where("user_id = ?", userId).Delete(&ExternalIdentityClaim{}).Error
 }
 
-// InitializeExternalIdentityClaims imports legacy Telegram bindings after the
-// claim table is migrated. Existing duplicate ownership fails migration rather
-// than preserving an ambiguous login identity.
+// InitializeExternalIdentityClaims imports legacy Telegram and WeChat
+// bindings after the claim table is migrated. Existing duplicate ownership
+// fails migration rather than preserving an ambiguous login identity.
 func InitializeExternalIdentityClaims() error {
 	var users []User
-	if err := DB.Unscoped().Select("id", "telegram_id").
-		Where("telegram_id <> ?", "").Find(&users).Error; err != nil {
+	if err := DB.Unscoped().Select("id", "telegram_id", "wechat_id").
+		Where("telegram_id <> ? OR wechat_id <> ?", "", "").Find(&users).Error; err != nil {
 		return err
 	}
 	return DB.Transaction(func(tx *gorm.DB) error {
 		for _, user := range users {
-			if err := ClaimExternalIdentityWithTx(tx, ExternalIdentityProviderTelegram, user.TelegramId, user.Id); err != nil {
-				return fmt.Errorf("backfill Telegram identity for user %d: %w", user.Id, err)
+			if user.TelegramId != "" {
+				if err := ClaimExternalIdentityWithTx(tx, ExternalIdentityProviderTelegram, user.TelegramId, user.Id); err != nil {
+					return fmt.Errorf("backfill Telegram identity for user %d: %w", user.Id, err)
+				}
+			}
+			if user.WeChatId != "" {
+				if err := ClaimExternalIdentityWithTx(tx, ExternalIdentityProviderWeChat, user.WeChatId, user.Id); err != nil {
+					return fmt.Errorf("backfill WeChat identity for user %d: %w", user.Id, err)
+				}
 			}
 		}
 		return nil

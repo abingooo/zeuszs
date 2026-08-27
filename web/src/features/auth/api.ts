@@ -140,12 +140,21 @@ export async function githubOAuthStart(clientId: string, state: string) {
 // Get OAuth state for CSRF protection
 export async function createOAuthFlow(
   provider: string,
-  intent: 'login' | 'bind'
+  intent: 'login' | 'bind',
+  organizationInviteCode?: string
 ): Promise<string> {
   const aff = intent === 'login' ? getAffiliateCode() : ''
+  const normalizedOrganizationInviteCode = organizationInviteCode?.trim()
   const res = await api.post(
     '/api/oauth/state',
-    { provider, intent, aff: aff || undefined },
+    {
+      provider,
+      intent,
+      aff: aff || undefined,
+      ...(normalizedOrganizationInviteCode
+        ? { organization_invite_code: normalizedOrganizationInviteCode }
+        : {}),
+    },
     { skipAuthRefresh: intent === 'login' }
   )
   if (res.data?.success) {
@@ -158,16 +167,30 @@ export async function createOAuthFlow(
 }
 
 // WeChat login by authorization code
-export async function wechatLoginByCode(code: string): Promise<ApiResponse> {
-  const res = await api.get('/api/oauth/wechat', { params: { code } })
+export async function wechatLoginByCode(
+  code: string,
+  organizationInviteCode?: string
+): Promise<ApiResponse> {
+  const normalizedOrganizationInviteCode = organizationInviteCode?.trim()
+  const res = await api.get('/api/oauth/wechat', {
+    params: { code },
+    headers: normalizedOrganizationInviteCode
+      ? { 'X-Organization-Invite-Code': normalizedOrganizationInviteCode }
+      : undefined,
+  })
   return res.data
 }
 
 export async function telegramLogin(
-  authorization: TelegramAuthorization
+  authorization: TelegramAuthorization,
+  organizationInviteCode?: string
 ): Promise<ApiResponse> {
+  const normalizedOrganizationInviteCode = organizationInviteCode?.trim()
   const res = await api.get('/api/oauth/telegram/login', {
     params: authorization,
+    headers: normalizedOrganizationInviteCode
+      ? { 'X-Organization-Invite-Code': normalizedOrganizationInviteCode }
+      : undefined,
     disableDuplicate: true,
     skipAuthRefresh: true,
     skipBusinessError: true,

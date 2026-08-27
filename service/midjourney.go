@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +22,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const MidjourneySubmissionRecoveryDelay = 5 * time.Minute
+
 func CovertMjpActionToModelName(mjAction string) string {
 	modelName := "mj_" + strings.ToLower(mjAction)
 	if mjAction == constant.MjActionSwapFace {
@@ -38,7 +39,12 @@ func PrepareMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.
 	}
 	task.Quota = 0
 	task.TokenId = 0
+	task.BillingTokenId = 0
+	task.BillingTokenReserved = false
 	task.BillingChannelId = 0
+	task.OrganizationReservationId = 0
+	task.BillingStatus = ""
+	task.UpstreamAccepted = false
 	if !shouldBill {
 		return false, nil
 	}
@@ -47,6 +53,9 @@ func PrepareMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.
 	}
 	if quota < 0 {
 		return false, errors.New("quota cannot be negative")
+	}
+	if quota == 0 {
+		return false, nil
 	}
 	if relayInfo.BillingSource == BillingSourceSubscription {
 		return false, errors.New("legacy Midjourney billing does not support subscriptions")
@@ -57,7 +66,32 @@ func PrepareMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.
 	if relayInfo.ChannelMeta != nil && relayInfo.ChannelId > 0 {
 		task.BillingChannelId = relayInfo.ChannelId
 	}
+	if !relayInfo.IsPlayground {
+		task.BillingTokenId = relayInfo.TokenId
+	}
 	return true, nil
+}
+
+// CreateMidjourneyTaskBilling persists the local submission before any upstream
+// side effect. Organization reservations are bound in the same main-DB transaction.
+func CreateMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.Midjourney, quota int, shouldBill bool) (bool, error) {
+	prepared, err := PrepareMidjourneyTaskBilling(relayInfo, task, quota, shouldBill)
+	if err != nil {
+		return false, err
+	}
+	if relayInfo == nil {
+		return false, errors.New("relay info is nil")
+	}
+	if task.Status == "" {
+		task.Status = model.MidjourneyStatusSubmitting
+	}
+	if task.Progress == "" {
+		task.Progress = "0%"
+	}
+	if err := task.InsertPreparedBilling(relayInfo.OrganizationId); err != nil {
+		return false, err
+	}
+	return prepared, nil
 }
 
 // SettleMidjourneyTaskBilling charges a persisted legacy task and records the applied stages.
@@ -71,8 +105,27 @@ func SettleMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.M
 	if task == nil || task.Id == 0 {
 		return false, errors.New("Midjourney task must be persisted before billing")
 	}
+	if task.OrganizationId > 0 {
+		if task.OrganizationReservationId <= 0 ||
+			(task.BillingStatus != model.MidjourneyBillingStatusReserved && task.BillingStatus != model.MidjourneyBillingStatusSettled) {
+			return false, model.ErrOrganizationLedgerRequired
+		}
+		result, err := task.SettleOrganizationBilling()
+		if err != nil {
+			return false, err
+		}
+		if !result.Settled {
+			return false, model.ErrOrganizationReservationState
+		}
+		task.QuotaClamp = result.QuotaClamp
+		if relayInfo.QuotaClamp == nil {
+			relayInfo.QuotaClamp = result.QuotaClamp
+		}
+		checkAndSendQuotaNotify(relayInfo, task.Quota, 0)
+		return true, nil
+	}
 
-	result, billingErr := postConsumeQuotaWithResult(relayInfo, task.Quota, 0, true)
+	result, billingErr := postConsumeQuotaWithResult(relayInfo, task.Quota, 0, false, false)
 	if !result.FundingApplied {
 		task.Quota = 0
 		task.TokenId = 0
@@ -83,13 +136,12 @@ func SettleMidjourneyTaskBilling(relayInfo *relaycommon.RelayInfo, task *model.M
 		return false, billingErr
 	}
 
-	task.TokenId = 0
-	if result.TokenApplied {
-		task.TokenId = relayInfo.TokenId
+	if !relayInfo.IsPlayground {
+		if _, err := task.SettleTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, task.Quota); err != nil {
+			return true, errors.Join(billingErr, fmt.Errorf("settle Midjourney token quota: %w", err))
+		}
 	}
-	if updateErr := task.UpdateBillingState(); updateErr != nil {
-		return true, errors.Join(billingErr, fmt.Errorf("update Midjourney billing state: %w", updateErr))
-	}
+	checkAndSendQuotaNotify(relayInfo, task.Quota, 0)
 	return true, billingErr
 }
 
@@ -100,42 +152,146 @@ func RefundMidjourneyQuota(ctx context.Context, task *model.Midjourney, reason s
 		return true
 	}
 
-	if err := model.IncreaseUserQuota(task.UserId, quota, false); err != nil {
-		logger.LogWarn(ctx, fmt.Sprintf("退还 Midjourney 用户额度失败 task %s: %s", task.MjId, err.Error()))
+	organizationWallet := task.OrganizationId > 0
+	var fundingErr error
+	if task.OrganizationId > 0 {
+		var applied bool
+		applied, fundingErr = task.RefundOrganizationBilling(reason, false)
+		if fundingErr == nil && !applied {
+			return true
+		}
+	} else {
+		fundingErr = model.IncreaseUserQuota(task.UserId, quota, false)
+	}
+	if fundingErr != nil {
+		logger.LogWarn(ctx, fmt.Sprintf("退还 Midjourney 用户额度失败 task %s: %s", task.MjId, fundingErr.Error()))
 		return false
 	}
-
-	if task.TokenId > 0 {
-		tokenKey := resolveTokenKey(ctx, task.TokenId, task.MjId)
-		if tokenKey != "" {
-			if err := model.IncreaseTokenQuota(task.TokenId, tokenKey, quota); err != nil {
-				logger.LogWarn(ctx, fmt.Sprintf("退还 Midjourney 令牌额度失败 task %s: %s", task.MjId, err.Error()))
+	if !organizationWallet {
+		if task.TokenId > 0 {
+			tokenKey := resolveTokenKey(ctx, task.TokenId, task.MjId)
+			if tokenKey != "" {
+				if err := model.IncreaseTokenQuota(task.TokenId, tokenKey, quota); err != nil {
+					logger.LogWarn(ctx, fmt.Sprintf("退还 Midjourney 令牌额度失败 task %s: %s", task.MjId, err.Error()))
+				}
 			}
 		}
+
+		billingChannelId := task.GetBillingChannelId()
+		model.UpdateUserUsedQuota(task.UserId, -quota)
+		model.UpdateChannelUsedQuota(billingChannelId, -quota)
 	}
 
-	billingChannelId := task.GetBillingChannelId()
-	model.UpdateUserUsedQuota(task.UserId, -quota)
-	model.UpdateChannelUsedQuota(billingChannelId, -quota)
+	if !organizationWallet {
+		RecordMidjourneyRefundLog(task, quota, reason)
+	}
+
+	if task.OrganizationId <= 0 {
+		task.Quota = 0
+		if err := task.UpdateBillingState(); err != nil {
+			logger.LogError(ctx, fmt.Sprintf("Midjourney 退款成功但清除 quota 失败 task %s: %s", task.MjId, err.Error()))
+		}
+	}
+	return true
+}
+
+func RecordMidjourneyRefundLog(task *model.Midjourney, quota int, reason string) {
+	if task == nil || quota <= 0 {
+		return
+	}
+	other := map[string]interface{}{
+		"task_id": task.MjId,
+		"reason":  reason,
+	}
+	attachQuotaSaturationToOther(other, task.QuotaClamp)
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
 		UserId:    task.UserId,
 		LogType:   model.LogTypeRefund,
 		Content:   "",
-		ChannelId: billingChannelId,
+		ChannelId: task.GetBillingChannelId(),
 		ModelName: CovertMjpActionToModelName(task.Action),
 		Quota:     quota,
 		TokenId:   task.TokenId,
-		Other: map[string]interface{}{
-			"task_id": task.MjId,
-			"reason":  reason,
-		},
+		Other:     other,
 	})
+}
 
-	task.Quota = 0
-	if err := task.UpdateBillingState(); err != nil {
-		logger.LogError(ctx, fmt.Sprintf("Midjourney 退款成功但清除 quota 失败 task %s: %s", task.MjId, err.Error()))
+// CancelPreparedMidjourneyTaskBilling releases a pre-upstream organization
+// reservation after a definitive upstream rejection. Ambiguous transport errors
+// are intentionally left for the timeout recovery path.
+func CancelPreparedMidjourneyTaskBilling(ctx context.Context, task *model.Midjourney, reason string) bool {
+	if task == nil || task.Id <= 0 {
+		return false
 	}
-	return true
+	if task.OrganizationId > 0 && task.BillingStatus == model.MidjourneyBillingStatusReserved {
+		_, err := task.RefundOrganizationBilling(reason, true)
+		if err != nil {
+			logger.LogError(ctx, fmt.Sprintf("release prepared Midjourney billing failed task %d: %s", task.Id, err.Error()))
+			return false
+		}
+		return true
+	}
+	task.Quota = 0
+	task.TokenId = 0
+	task.BillingTokenId = 0
+	task.BillingChannelId = 0
+	task.Status = "FAILURE"
+	task.Progress = "100%"
+	task.FailReason = reason
+	if err := task.UpdateSubmissionResult(); err != nil {
+		logger.LogError(ctx, fmt.Sprintf("mark unbilled Midjourney submission failed task %d: %s", task.Id, err.Error()))
+		return false
+	}
+	return task.UpdateBillingState() == nil
+}
+
+type MidjourneyBillingRecoverySummary struct {
+	Settled  int
+	Refunded int
+	Failed   int
+}
+
+func RecoverMidjourneyBilling(ctx context.Context, cutoffMilliseconds int64, limit int) MidjourneyBillingRecoverySummary {
+	summary := MidjourneyBillingRecoverySummary{}
+	tasks, err := model.GetRecoverableMidjourneySubmissions(cutoffMilliseconds, limit)
+	if err != nil {
+		logger.LogError(ctx, "load recoverable Midjourney submissions failed: "+err.Error())
+		return summary
+	}
+	for _, task := range tasks {
+		if task.BillingStatus == model.MidjourneyBillingStatusReserved {
+			if task.UpstreamAccepted && strings.TrimSpace(task.MjId) != "" {
+				result, settleErr := task.SettleOrganizationBilling()
+				if settleErr != nil {
+					logger.LogError(ctx, fmt.Sprintf("recover Midjourney settlement failed task %d: %s", task.Id, settleErr.Error()))
+					continue
+				}
+				if result.Applied {
+					task.QuotaClamp = result.QuotaClamp
+					summary.Settled++
+				}
+				continue
+			}
+			applied, refundErr := task.RefundOrganizationBilling("上游提交未完成，预留额度已退还", true)
+			if refundErr != nil {
+				logger.LogError(ctx, fmt.Sprintf("recover Midjourney refund failed task %d: %s", task.Id, refundErr.Error()))
+				continue
+			}
+			if applied {
+				summary.Refunded++
+			}
+			continue
+		}
+		failed, failErr := task.FailStaleSubmission("上游提交未完成")
+		if failErr != nil {
+			logger.LogError(ctx, fmt.Sprintf("mark stale Midjourney submission failed task %d: %s", task.Id, failErr.Error()))
+			continue
+		}
+		if failed {
+			summary.Failed++
+		}
+	}
+	return summary
 }
 
 func GetMjRequestModel(relayMode int, midjRequest *dto.MidjourneyRequest) (string, *dto.MidjourneyResponse, bool) {
@@ -281,7 +437,7 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 	var mapResult map[string]interface{}
 	// if get request, no need to read request body
 	if c.Request.Method != "GET" {
-		err := json.NewDecoder(c.Request.Body).Decode(&mapResult)
+		err := common.DecodeJson(c.Request.Body, &mapResult)
 		if err != nil {
 			return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "read_request_body_failed", http.StatusInternalServerError), nullBytes, err
 		}
@@ -303,7 +459,7 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 			mapResult["prompt"] = prompt
 		}
 	}
-	reqBody, err := json.Marshal(mapResult)
+	reqBody, err := common.Marshal(mapResult)
 	if err != nil {
 		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "marshal_request_body_failed", http.StatusInternalServerError), nullBytes, err
 	}
@@ -350,9 +506,9 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 	if len(responseBody) == 0 {
 		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "empty_response_body", statusCode), responseBody, nil
 	} else {
-		err = json.Unmarshal(responseBody, &midjResponse)
+		err = common.Unmarshal(responseBody, &midjResponse)
 		if err != nil {
-			err2 := json.Unmarshal(responseBody, &midjourneyUploadsResponse)
+			err2 := common.Unmarshal(responseBody, &midjourneyUploadsResponse)
 			if err2 != nil {
 				return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "unmarshal_response_body_failed", statusCode), responseBody, err
 			}

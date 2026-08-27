@@ -37,4 +37,23 @@ describe('sidebar data', () => {
         })
     ).toBe(false)
   })
+
+  test('exposes tenant and platform organization navigation separately', () => {
+    const { result } = renderHook(() => useSidebarData())
+    const personal = result.current.navGroups.find(
+      (group) => group.id === 'personal'
+    )
+    const admin = result.current.navGroups.find((group) => group.id === 'admin')
+
+    expect(personal?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ url: '/organization' }),
+      ])
+    )
+    expect(admin?.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ url: '/organizations' }),
+      ])
+    )
+  })
 })

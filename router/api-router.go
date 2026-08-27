@@ -3,6 +3,7 @@ package router
 import (
 	"github.com/QuantumNous/new-api/controller"
 	"github.com/QuantumNous/new-api/middleware"
+	"github.com/QuantumNous/new-api/service"
 
 	// Import oauth package to register providers via init()
 	_ "github.com/QuantumNous/new-api/oauth"
@@ -101,15 +102,15 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.GET("/topup/info", controller.GetTopUpInfo)
 				selfRoute.GET("/topup/self", controller.GetUserTopUps)
 				selfRoute.POST("/topup", middleware.CriticalRateLimit(), controller.TopUp)
-				selfRoute.POST("/pay", middleware.CriticalRateLimit(), controller.RequestEpay)
-				selfRoute.POST("/amount", controller.RequestAmount)
-				selfRoute.POST("/stripe/pay", middleware.CriticalRateLimit(), controller.RequestStripePay)
-				selfRoute.POST("/stripe/amount", controller.RequestStripeAmount)
-				selfRoute.POST("/creem/pay", middleware.CriticalRateLimit(), controller.RequestCreemPay)
-				selfRoute.POST("/waffo/amount", controller.RequestWaffoAmount)
-				selfRoute.POST("/waffo/pay", middleware.CriticalRateLimit(), controller.RequestWaffoPay)
-				selfRoute.POST("/waffo-pancake/amount", controller.RequestWaffoPancakeAmount)
-				selfRoute.POST("/waffo-pancake/pay", middleware.CriticalRateLimit(), controller.RequestWaffoPancakePay)
+				selfRoute.POST("/pay", middleware.CriticalRateLimit(), middleware.RequireOrganizationWalletTopup(), controller.RequestEpay)
+				selfRoute.POST("/amount", middleware.RequireOrganizationWalletTopup(), controller.RequestAmount)
+				selfRoute.POST("/stripe/pay", middleware.CriticalRateLimit(), middleware.RequireOrganizationWalletTopup(), controller.RequestStripePay)
+				selfRoute.POST("/stripe/amount", middleware.RequireOrganizationWalletTopup(), controller.RequestStripeAmount)
+				selfRoute.POST("/creem/pay", middleware.CriticalRateLimit(), middleware.RequireOrganizationWalletTopup(), controller.RequestCreemPay)
+				selfRoute.POST("/waffo/amount", middleware.RequireOrganizationWalletTopup(), controller.RequestWaffoAmount)
+				selfRoute.POST("/waffo/pay", middleware.CriticalRateLimit(), middleware.RequireOrganizationWalletTopup(), controller.RequestWaffoPay)
+				selfRoute.POST("/waffo-pancake/amount", middleware.RequireOrganizationWalletTopup(), controller.RequestWaffoPancakeAmount)
+				selfRoute.POST("/waffo-pancake/pay", middleware.CriticalRateLimit(), middleware.RequireOrganizationWalletTopup(), controller.RequestWaffoPancakePay)
 				selfRoute.POST("/aff_transfer", middleware.UserCriticalRateLimit("aff-transfer"), controller.TransferAffQuota)
 				selfRoute.PUT("/setting", controller.UpdateUserSetting)
 
@@ -233,6 +234,48 @@ func SetApiRouter(router *gin.Engine) {
 		}
 		registerChannelRoutes(apiRouter)
 		registerAuthzRoutes(apiRouter)
+		organizationRoute := apiRouter.Group("/organization")
+		organizationRoute.Use(middleware.UserAuth(), middleware.RequireActiveOrganization())
+		{
+			organizationRoute.GET("/self", middleware.RequireOrganizationAction(service.OrganizationActionRead), controller.GetTenantOrganizationSummary)
+			organizationRoute.GET("/members", middleware.RequireOrganizationAction(service.OrganizationActionMemberRead), controller.ListTenantOrganizationMembers)
+			organizationRoute.PATCH("/members/:user_id/status", middleware.RequireOrganizationAction(service.OrganizationActionMemberDisable), controller.UpdateTenantOrganizationMemberStatus)
+			organizationRoute.PUT("/members/:user_id/status", middleware.RequireOrganizationAction(service.OrganizationActionMemberDisable), controller.UpdateTenantOrganizationMemberStatus)
+			organizationRoute.PATCH("/members/:user_id/consumption-limit", middleware.RequireOrganizationAction(service.OrganizationActionMemberLimitUpdate), controller.UpdateTenantOrganizationMemberLimit)
+			organizationRoute.PUT("/members/:user_id/consumption-limit", middleware.RequireOrganizationAction(service.OrganizationActionMemberLimitUpdate), controller.UpdateTenantOrganizationMemberLimit)
+			organizationRoute.POST("/members/:user_id/allocate", middleware.RequireOrganizationAction(service.OrganizationActionMemberAllocate), controller.AllocateTenantOrganizationMemberQuota)
+			organizationRoute.POST("/members/:user_id/recover", middleware.RequireOrganizationAction(service.OrganizationActionMemberRecover), controller.RecoverTenantOrganizationMemberQuota)
+			organizationRoute.POST("/members/:user_id/tokens/disable", middleware.RequireOrganizationAction(service.OrganizationActionMemberTokenDisable), controller.DisableTenantOrganizationMemberTokens)
+			organizationRoute.GET("/invites", middleware.RequireOrganizationAction(service.OrganizationActionInviteRead), controller.ListTenantOrganizationInvites)
+			organizationRoute.POST("/invites", middleware.RequireOrganizationAction(service.OrganizationActionInviteCreate), controller.CreateTenantOrganizationInvite)
+			organizationRoute.PATCH("/invites/:invite_id/status", middleware.RequireOrganizationAction(service.OrganizationActionInviteDisable), controller.DisableTenantOrganizationInvite)
+			organizationRoute.DELETE("/invites/:invite_id", middleware.RequireOrganizationAction(service.OrganizationActionInviteDisable), controller.DisableTenantOrganizationInvite)
+			organizationRoute.PATCH("/topup-policy", middleware.RequireOrganizationAction(service.OrganizationActionTopupPolicyUpdate), controller.UpdateTenantOrganizationTopupPolicy)
+			organizationRoute.PUT("/topup-policy", middleware.RequireOrganizationAction(service.OrganizationActionTopupPolicyUpdate), controller.UpdateTenantOrganizationTopupPolicy)
+			organizationRoute.GET("/ledger", middleware.RequireOrganizationAction(service.OrganizationActionLedgerRead), controller.ListTenantOrganizationLedger)
+			organizationRoute.GET("/audit", middleware.RequireOrganizationAction(service.OrganizationActionAuditRead), controller.ListTenantOrganizationAudit)
+		}
+		organizationAdminRoute := apiRouter.Group("/organization/admin")
+		organizationAdminRoute.Use(middleware.AdminAuth())
+		{
+			organizationAdminRoute.GET("/", controller.ListPlatformOrganizations)
+			organizationAdminRoute.POST("/", controller.CreatePlatformOrganization)
+			organizationAdminRoute.PATCH("/:id/status", controller.UpdatePlatformOrganizationStatus)
+			organizationAdminRoute.PUT("/:id/status", controller.UpdatePlatformOrganizationStatus)
+			organizationAdminRoute.PATCH("/:id/members/:user_id/role", controller.AssignPlatformOrganizationMemberRole)
+			organizationAdminRoute.PUT("/:id/members/:user_id/role", controller.AssignPlatformOrganizationMemberRole)
+			organizationAdminRoute.PATCH("/:id/ownership", controller.TransferPlatformOrganizationOwnership)
+			organizationAdminRoute.PUT("/:id/ownership", controller.TransferPlatformOrganizationOwnership)
+			organizationAdminRoute.GET("/:id/members", controller.ListPlatformOrganizationMembers)
+			organizationAdminRoute.POST("/:id/members", controller.ProvisionPlatformOrganizationMember)
+			organizationAdminRoute.POST("/:id/fund-credit", controller.CreditPlatformOrganizationFund)
+			organizationAdminRoute.PATCH("/:id/topup-policy", controller.UpdatePlatformOrganizationTopupPolicy)
+			organizationAdminRoute.PUT("/:id/topup-policy", controller.UpdatePlatformOrganizationTopupPolicy)
+			organizationAdminRoute.GET("/:id/invites", controller.ListPlatformOrganizationInvites)
+			organizationAdminRoute.POST("/:id/invites", controller.CreatePlatformOrganizationInvite)
+			organizationAdminRoute.PATCH("/:id/invites/:invite_id/status", controller.DisablePlatformOrganizationInvite)
+			organizationAdminRoute.DELETE("/:id/invites/:invite_id", controller.DisablePlatformOrganizationInvite)
+		}
 		tokenRoute := apiRouter.Group("/token")
 		tokenRoute.Use(middleware.UserAuth())
 		{

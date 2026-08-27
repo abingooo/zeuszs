@@ -49,7 +49,7 @@ func setupModelListControllerTestDB(t *testing.T) *gorm.DB {
 	model.DB = db
 	model.LOG_DB = db
 
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.Channel{}, &model.Ability{}, &model.Model{}, &model.Vendor{}))
+	require.NoError(t, db.AutoMigrate(&model.Organization{}, &model.User{}, &model.Channel{}, &model.Ability{}, &model.Model{}, &model.Vendor{}))
 
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()
@@ -536,15 +536,23 @@ func TestCheckUpdatePasswordRejectsHistoricalEmptyPassword(t *testing.T) {
 func TestSetupLoginDoesNotTouchPasswordWhenPasswordFieldOmitted(t *testing.T) {
 	db := setupModelListControllerTestDB(t)
 	require.NoError(t, db.AutoMigrate(&model.Log{}, &model.UserSession{}))
+	organization := &model.Organization{
+		Name: "Two-factor Organization", Status: model.OrganizationStatusActive,
+		OwnerUserId: 1001, PolicyVersion: 1,
+	}
+	require.NoError(t, db.Create(organization).Error)
 
 	hashedPassword, err := common.Password2Hash("CurrentPassword123")
 	require.NoError(t, err)
 	user := &model.User{
-		Username: "twofa-user",
-		Password: hashedPassword,
-		Role:     common.RoleCommonUser,
-		Status:   common.UserStatusEnabled,
-		Group:    "default",
+		Username:           "twofa-user",
+		Password:           hashedPassword,
+		Role:               common.RoleCommonUser,
+		Status:             common.UserStatusEnabled,
+		Group:              "default",
+		OrganizationId:     organization.Id,
+		OrganizationRole:   model.OrganizationRoleMember,
+		OrganizationStatus: model.OrganizationMemberStatusActive,
 	}
 	require.NoError(t, db.Create(user).Error)
 

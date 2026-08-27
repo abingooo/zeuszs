@@ -13,7 +13,9 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/glebarez/sqlite"
+	"github.com/go-redis/redis/v8"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -46,6 +48,7 @@ func TestMain(m *testing.M) {
 		&model.Log{},
 		&model.Channel{},
 		&model.Midjourney{},
+		&model.BillingLogOutbox{},
 		&model.TopUp{},
 		&model.UserSubscription{},
 		&model.SystemTask{},
@@ -70,11 +73,44 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM logs")
 		model.DB.Exec("DELETE FROM channels")
 		model.DB.Exec("DELETE FROM midjourneys")
+		model.DB.Exec("DELETE FROM billing_log_outboxes")
 		model.DB.Exec("DELETE FROM top_ups")
 		model.DB.Exec("DELETE FROM user_subscriptions")
 		model.DB.Exec("DELETE FROM system_task_locks")
 		model.DB.Exec("DELETE FROM system_tasks")
 	})
+}
+
+func useTaskBillingMiniRedis(t *testing.T) {
+	t.Helper()
+	server := miniredis.RunT(t)
+	previousRedisEnabled := common.RedisEnabled
+	previousRDB := common.RDB
+	common.RedisEnabled = true
+	common.RDB = redis.NewClient(&redis.Options{Addr: server.Addr()})
+	t.Cleanup(func() {
+		_ = common.RDB.Close()
+		common.RedisEnabled = previousRedisEnabled
+		common.RDB = previousRDB
+	})
+}
+
+func seedTaskBillingTokenCache(t *testing.T, tokenID int, tokenKey string, remainQuota int) string {
+	t.Helper()
+	cacheKey := "token:" + common.GenerateHMAC(tokenKey)
+	require.NoError(t, common.RDB.HSet(t.Context(), cacheKey, map[string]interface{}{
+		"Id": tokenID, "RemainQuota": remainQuota, "UsedQuota": 0,
+	}).Err())
+	return cacheKey
+}
+
+func getTaskBillingTokenCacheQuota(t *testing.T, cacheKey string) (int, int) {
+	t.Helper()
+	remainQuota, err := common.RDB.HGet(t.Context(), cacheKey, "RemainQuota").Int()
+	require.NoError(t, err)
+	usedQuota, err := common.RDB.HGet(t.Context(), cacheKey, "UsedQuota").Int()
+	require.NoError(t, err)
+	return remainQuota, usedQuota
 }
 
 func seedUser(t *testing.T, id int, quota int) {
@@ -565,6 +601,60 @@ func TestSettleMidjourneyTaskBillingTokenFailureKeepsFundingRefundable(t *testin
 	log := getLastLog(t)
 	require.NotNil(t, log)
 	assert.Zero(t, log.TokenId)
+}
+
+func TestSettleMidjourneyTaskBillingMarkerFailureRollsBackTokenCharge(t *testing.T) {
+	truncate(t)
+	useTaskBillingMiniRedis(t)
+
+	const userID, tokenID, channelID = 55, 55, 55
+	const initialUserQuota, initialTokenQuota, chargedQuota = 10000, 5000, 3000
+	seedUser(t, userID, initialUserQuota)
+	seedToken(t, tokenID, userID, "sk-midjourney-marker-failure", initialTokenQuota)
+	seedChannel(t, channelID)
+	tokenCacheKey := seedTaskBillingTokenCache(t, tokenID, "sk-midjourney-marker-failure", initialTokenQuota)
+
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:    userID,
+		TokenId:   tokenID,
+		TokenKey:  "sk-midjourney-marker-failure",
+		UserQuota: initialUserQuota,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId: channelID,
+		},
+	}
+	task := &model.Midjourney{UserId: userID, MjId: "mj-marker-failure", ChannelId: channelID}
+	prepared, err := PrepareMidjourneyTaskBilling(relayInfo, task, chargedQuota, true)
+	require.NoError(t, err)
+	require.True(t, prepared)
+	require.NoError(t, task.Insert())
+
+	require.NoError(t, model.DB.Exec(`
+		CREATE TRIGGER fail_midjourney_token_marker
+		BEFORE UPDATE OF token_id ON midjourneys
+		BEGIN
+			SELECT RAISE(ABORT, 'forced token marker failure');
+		END;
+	`).Error)
+	t.Cleanup(func() {
+		model.DB.Exec("DROP TRIGGER IF EXISTS fail_midjourney_token_marker")
+	})
+
+	billed, err := SettleMidjourneyTaskBilling(relayInfo, task, prepared)
+
+	require.Error(t, err)
+	assert.True(t, billed)
+	assert.Zero(t, task.TokenId)
+	assert.Equal(t, initialUserQuota-chargedQuota, getUserQuota(t, userID))
+	assert.Equal(t, initialTokenQuota, getTokenRemainQuota(t, tokenID))
+	assert.Zero(t, getTokenUsedQuota(t, tokenID))
+	cachedRemainQuota, cachedUsedQuota := getTaskBillingTokenCacheQuota(t, tokenCacheKey)
+	assert.Equal(t, initialTokenQuota, cachedRemainQuota)
+	assert.Zero(t, cachedUsedQuota)
+	persisted := getMidjourneyTask(t, task.Id)
+	assert.Equal(t, chargedQuota, persisted.Quota)
+	assert.Zero(t, persisted.TokenId)
+	assert.Equal(t, channelID, persisted.BillingChannelId)
 }
 
 func TestPrepareMidjourneyTaskBillingRejectsSubscriptionBeforeCharge(t *testing.T) {

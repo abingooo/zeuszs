@@ -38,7 +38,8 @@ import { useAuthRedirect } from './use-auth-redirect'
  */
 export function useOAuthLogin(
   status: SystemStatus | null,
-  redirectTo?: string
+  redirectTo?: string,
+  organizationInviteCode?: string
 ) {
   const { t } = useTranslation()
   const { handleLoginSuccess } = useAuthRedirect()
@@ -89,7 +90,11 @@ export function useOAuthLogin(
 
     try {
       await resetSession()
-      const state = await createOAuthFlow('github', 'login')
+      const state = await createOAuthFlow(
+        'github',
+        'login',
+        organizationInviteCode
+      )
 
       const url = buildGitHubOAuthUrl(status.github_client_id, state)
       window.open(url, '_self')
@@ -110,7 +115,11 @@ export function useOAuthLogin(
     setIsLoading(true)
     try {
       await resetSession()
-      const state = await createOAuthFlow('discord', 'login')
+      const state = await createOAuthFlow(
+        'discord',
+        'login',
+        organizationInviteCode
+      )
 
       const url = buildDiscordOAuthUrl(status.discord_client_id, state)
       window.open(url, '_self')
@@ -127,7 +136,11 @@ export function useOAuthLogin(
     setIsLoading(true)
     try {
       await resetSession()
-      const state = await createOAuthFlow('oidc', 'login')
+      const state = await createOAuthFlow(
+        'oidc',
+        'login',
+        organizationInviteCode
+      )
 
       const url = buildOIDCOAuthUrl(
         status.oidc_authorization_endpoint,
@@ -148,7 +161,11 @@ export function useOAuthLogin(
     setIsLoading(true)
     try {
       await resetSession()
-      const state = await createOAuthFlow('linuxdo', 'login')
+      const state = await createOAuthFlow(
+        'linuxdo',
+        'login',
+        organizationInviteCode
+      )
 
       const url = buildLinuxDOOAuthUrl(status.linuxdo_client_id, state)
       window.open(url, '_self')
@@ -187,7 +204,10 @@ export function useOAuthLogin(
 
     setIsTelegramPending(true)
     try {
-      const response = await telegramLogin(authorization)
+      const response = await telegramLogin(
+        authorization,
+        organizationInviteCode
+      )
       if (!response.success || !isAuthBundle(response.data)) {
         toast.error(t('Login failed'))
         return
@@ -209,7 +229,11 @@ export function useOAuthLogin(
     setIsLoading(true)
     try {
       await resetSession()
-      const state = await createOAuthFlow(provider.slug, 'login')
+      const state = await createOAuthFlow(
+        provider.slug,
+        'login',
+        organizationInviteCode
+      )
 
       const redirectUri = `${window.location.origin}/oauth/${provider.slug}`
       const url = new URL(provider.authorization_endpoint)

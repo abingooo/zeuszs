@@ -29,7 +29,11 @@ func setupDashboardAuthMiddlewareTest(t *testing.T) {
 	previousSecret := common.SessionSecret
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}))
+	require.NoError(t, db.AutoMigrate(&model.Organization{}, &model.User{}, &model.UserSession{}))
+	require.NoError(t, db.Create(&model.Organization{
+		Name: "Middleware Auth Organization", Status: model.OrganizationStatusActive,
+		OwnerUserId: 1001, PolicyVersion: 1,
+	}).Error)
 	model.DB = db
 	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
 	common.RedisEnabled = false
@@ -75,10 +79,14 @@ func tamperDashboardToken(token string) string {
 
 func createMiddlewarePATUser(t *testing.T, username, token string) *model.User {
 	t.Helper()
+	var organization model.Organization
+	require.NoError(t, model.DB.First(&organization).Error)
 	user := &model.User{
 		Username: username, Password: "password-placeholder", Role: common.RoleCommonUser,
 		Status: common.UserStatusEnabled, Group: "default", AccessToken: &token, AuthVersion: 1,
-		AffCode: "middleware-aff-" + username,
+		AffCode:        "middleware-aff-" + username,
+		OrganizationId: organization.Id, OrganizationRole: model.OrganizationRoleMember,
+		OrganizationStatus: model.OrganizationMemberStatusActive,
 	}
 	require.NoError(t, model.DB.Create(user).Error)
 	return user
@@ -103,6 +111,98 @@ func TestUserAuthAllowsOpaqueDottedPAT(t *testing.T) {
 	}
 	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
 	assert.Equal(t, user.Id, body.ID)
+}
+
+func TestUserAuthRejectsInactiveOrganizationForSessionAndPAT(t *testing.T) {
+	tests := []struct {
+		name    string
+		disable func(t *testing.T, user *model.User)
+	}{
+		{
+			name: "membership disabled",
+			disable: func(t *testing.T, user *model.User) {
+				t.Helper()
+				require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).
+					Update("organization_status", model.OrganizationMemberStatusDisabled).Error)
+			},
+		},
+		{
+			name: "organization disabled",
+			disable: func(t *testing.T, user *model.User) {
+				t.Helper()
+				require.NoError(t, model.DB.Model(&model.Organization{}).Where("id = ?", user.OrganizationId).
+					Update("status", model.OrganizationStatusDisabled).Error)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			setupDashboardAuthMiddlewareTest(t)
+			user := createMiddlewarePATUser(t, "inactive-organization-user", "inactive-organization-pat")
+			bundle, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "test-agent")
+			require.NoError(t, err)
+			test.disable(t, user)
+
+			router := gin.New()
+			router.GET("/protected", UserAuth(), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+			credentials := []struct {
+				name  string
+				token string
+			}{
+				{name: "session", token: bundle.AccessToken},
+				{name: "pat", token: "inactive-organization-pat"},
+			}
+			for _, credential := range credentials {
+				t.Run(credential.name, func(t *testing.T) {
+					request := httptest.NewRequest(http.MethodGet, "/protected", nil)
+					request.Header.Set("Authorization", "Bearer "+credential.token)
+					response := httptest.NewRecorder()
+					router.ServeHTTP(response, request)
+					assert.Equal(t, http.StatusUnauthorized, response.Code)
+					assert.Contains(t, response.Body.String(), "AUTH_SESSION_REVOKED")
+				})
+			}
+		})
+	}
+}
+
+func TestPlatformAdminRecoveryAuthDoesNotBypassUserAuth(t *testing.T) {
+	setupDashboardAuthMiddlewareTest(t)
+	user := createMiddlewarePATUser(t, "platform-recovery-admin", "platform-recovery-pat")
+	require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+		"role":                common.RoleAdminUser,
+		"organization_status": model.OrganizationMemberStatusDisabled,
+	}).Error)
+	require.NoError(t, model.DB.Model(&model.Organization{}).Where("id = ?", user.OrganizationId).
+		Update("status", model.OrganizationStatusDisabled).Error)
+	bundle, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "test-agent")
+	require.NoError(t, err)
+
+	router := gin.New()
+	router.GET("/user", UserAuth(), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	router.GET("/admin", AdminAuth(), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	credentials := []struct {
+		name  string
+		token string
+	}{
+		{name: "session", token: bundle.AccessToken},
+		{name: "pat", token: "platform-recovery-pat"},
+	}
+	for _, credential := range credentials {
+		t.Run(credential.name, func(t *testing.T) {
+			userRequest := httptest.NewRequest(http.MethodGet, "/user", nil)
+			userRequest.Header.Set("Authorization", "Bearer "+credential.token)
+			userResponse := httptest.NewRecorder()
+			router.ServeHTTP(userResponse, userRequest)
+			assert.Equal(t, http.StatusUnauthorized, userResponse.Code)
+
+			adminRequest := httptest.NewRequest(http.MethodGet, "/admin", nil)
+			adminRequest.Header.Set("Authorization", "Bearer "+credential.token)
+			adminResponse := httptest.NewRecorder()
+			router.ServeHTTP(adminResponse, adminRequest)
+			assert.Equal(t, http.StatusNoContent, adminResponse.Code)
+		})
+	}
 }
 
 func TestUserAuthNeverFallsBackForRecognizedInvalidInternalJWT(t *testing.T) {

@@ -332,6 +332,7 @@ func InitResources() error {
 	if err != nil {
 		return err
 	}
+	model.StartBillingLogOutboxDispatcher()
 
 	// Initialize Redis
 	err = common.InitRedisClient()

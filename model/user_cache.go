@@ -11,19 +11,22 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const userCacheSchemaVersion = 2
+const userCacheSchemaVersion = 3
 
 type UserBase struct {
-	Id          int    `json:"id"`
-	Group       string `json:"group"`
-	Email       string `json:"email"`
-	Quota       int    `json:"quota"`
-	Status      int    `json:"status"`
-	Role        int    `json:"role"`
-	Username    string `json:"username"`
-	Setting     string `json:"setting"`
-	AuthVersion int64  `json:"-"`
-	CacheSchema int    `json:"-"`
+	Id                 int                      `json:"id"`
+	Group              string                   `json:"group"`
+	Email              string                   `json:"email"`
+	Quota              int                      `json:"quota"`
+	Status             int                      `json:"status"`
+	Role               int                      `json:"role"`
+	OrganizationId     int                      `json:"organization_id"`
+	OrganizationRole   OrganizationRole         `json:"organization_role"`
+	OrganizationStatus OrganizationMemberStatus `json:"organization_status"`
+	Username           string                   `json:"username"`
+	Setting            string                   `json:"setting"`
+	AuthVersion        int64                    `json:"-"`
+	CacheSchema        int                      `json:"-"`
 }
 
 func (user *UserBase) WriteContext(c *gin.Context) {
@@ -32,6 +35,10 @@ func (user *UserBase) WriteContext(c *gin.Context) {
 	common.SetContextKey(c, constant.ContextKeyUserStatus, user.Status)
 	common.SetContextKey(c, constant.ContextKeyUserEmail, user.Email)
 	common.SetContextKey(c, constant.ContextKeyUserName, user.Username)
+	// Organization identity is copied from the authenticated user snapshot;
+	// request payloads never participate in tenant selection.
+	common.SetContextKey(c, constant.ContextKeyOrganizationId, user.OrganizationId)
+	common.SetContextKey(c, constant.ContextKeyOrganizationRole, string(user.OrganizationRole))
 	common.SetContextKey(c, constant.ContextKeyUserSetting, user.GetSetting())
 }
 

@@ -44,12 +44,15 @@ jobs:
       - name: Build Backend (amd64)
         run: |
           go mod download
-          go build -ldflags "-s -w -X 'new-api/common.Version=$VERSION' -extldflags '-static'" -o new-api-$VERSION
+          VERSION_PKG=$(go list -f '{{.ImportPath}}' ./common)
+          go build -ldflags "-s -w -X 'new-api/common.Version=$VERSION' -X '${VERSION_PKG}.Version=$VERSION' -extldflags '-static'" -o new-api-$VERSION
+          env -u VERSION ./new-api-$VERSION --version | grep -Fx "$VERSION"
       - name: Build Backend (arm64)
         run: |
           sudo apt-get update
           DEBIAN_FRONTEND=noninteractive sudo apt-get install -y gcc-aarch64-linux-gnu
-          CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w -X 'new-api/common.Version=$VERSION' -extldflags '-static'" -o new-api-arm64-$VERSION
+          VERSION_PKG=$(go list -f '{{.ImportPath}}' ./common)
+          CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w -X 'new-api/common.Version=$VERSION' -X '${VERSION_PKG}.Version=$VERSION' -extldflags '-static'" -o new-api-arm64-$VERSION
       - name: Generate checksums
         run: sha256sum new-api-* > checksums-linux.txt
 
@@ -94,7 +97,9 @@ jobs:
       - name: Build Backend
         run: |
           go mod download
-          go build -ldflags "-X 'new-api/common.Version=$VERSION'" -o new-api-macos-$VERSION
+          VERSION_PKG=$(go list -f '{{.ImportPath}}' ./common)
+          go build -ldflags "-X 'new-api/common.Version=$VERSION' -X '${VERSION_PKG}.Version=$VERSION'" -o new-api-macos-$VERSION
+          env -u VERSION ./new-api-macos-$VERSION --version | grep -Fx "$VERSION"
       - name: Generate checksums
         run: shasum -a 256 new-api-macos-* > checksums-macos.txt
 
@@ -141,7 +146,9 @@ jobs:
       - name: Build Backend
         run: |
           go mod download
-          go build -ldflags "-s -w -X 'new-api/common.Version=$VERSION'" -o new-api-$VERSION.exe
+          VERSION_PKG=$(go list -f '{{.ImportPath}}' ./common)
+          go build -ldflags "-s -w -X 'new-api/common.Version=$VERSION' -X '${VERSION_PKG}.Version=$VERSION'" -o new-api-$VERSION.exe
+          env -u VERSION ./new-api-$VERSION.exe --version | grep -Fx "$VERSION"
       - name: Generate checksums
         run: sha256sum new-api-*.exe > checksums-windows.txt
 

@@ -49,6 +49,7 @@ import {
   getAffiliateCode,
   saveAffiliateCode,
 } from '@/features/auth/lib/storage'
+import { createRegistrationRequest } from '@/features/auth/sign-up/lib/registration-request'
 import { useStatus } from '@/hooks/use-status'
 import { isAuthBundle } from '@/lib/api'
 import { getServerErrorMessageKey } from '@/lib/server-error-message'
@@ -94,10 +95,12 @@ export function SignUpForm({
       email: '',
       password: '',
       confirmPassword: '',
+      organization_invite_code: '',
     },
   })
 
   const emailValue = form.watch('email')
+  const organizationInviteCode = form.watch('organization_invite_code')
   const emailVerificationRequired = !!status?.email_verification
   const hasUserAgreement = Boolean(status?.user_agreement_enabled)
   const hasPrivacyPolicy = Boolean(status?.privacy_policy_enabled)
@@ -160,14 +163,17 @@ export function SignUpForm({
 
     setIsLoading(true)
     try {
-      const res = await register({
-        username: data.username,
-        password: data.password,
-        email: data.email || undefined,
-        verification_code: verificationCode || undefined,
-        aff_code: getAffiliateCode(),
-        turnstile: turnstileToken,
-      })
+      const res = await register(
+        createRegistrationRequest({
+          username: data.username,
+          password: data.password,
+          email: data.email,
+          verificationCode,
+          affiliateCode: getAffiliateCode(),
+          organizationInviteCode: data.organization_invite_code,
+          turnstile: turnstileToken,
+        })
+      )
 
       if (res?.success) {
         toast.success(t('Account created! Please sign in'))
@@ -214,7 +220,7 @@ export function SignUpForm({
 
     setIsWeChatSubmitting(true)
     try {
-      const res = await wechatLoginByCode(wechatCode)
+      const res = await wechatLoginByCode(wechatCode, organizationInviteCode)
       if (res?.success && isAuthBundle(res.data)) {
         await handleLoginSuccess(res.data)
         toast.success(t('Signed in via WeChat'))
@@ -289,6 +295,24 @@ export function SignUpForm({
               <FormLabel>{t('Confirm password')}</FormLabel>
               <FormControl>
                 <PasswordInput placeholder={t('Confirm password')} {...field} />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name='organization_invite_code'
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>{t('Organization invite code (optional)')}</FormLabel>
+              <FormControl>
+                <Input
+                  placeholder={t('Enter organization invite code')}
+                  autoComplete='off'
+                  {...field}
+                />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -381,6 +405,7 @@ export function SignUpForm({
         {oauthRegisterEnabled && (
           <OAuthProviders
             status={status}
+            organizationInviteCode={organizationInviteCode}
             disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
             onWeChatLogin={hasWeChatLogin ? handleOpenWeChatDialog : undefined}
             isWeChatLoading={isWeChatSubmitting}

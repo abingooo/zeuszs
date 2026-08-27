@@ -147,7 +147,14 @@ func PreWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usag
 		return fmt.Errorf("token quota is not enough, token remain quota: %s, need quota: %s", logger.FormatQuota(token.RemainQuota), logger.FormatQuota(quota))
 	}
 
-	err = PostConsumeQuota(relayInfo, quota, 0, false)
+	if relayInfo.Billing != nil {
+		err = relayInfo.Billing.Reserve(quota)
+	} else {
+		if relayInfo.OrganizationId > 0 {
+			return model.ErrOrganizationLedgerRequired
+		}
+		err = PostConsumeQuota(relayInfo, quota, 0, false)
+	}
 	if err != nil {
 		return err
 	}
@@ -408,18 +415,23 @@ func PreConsumeTokenQuota(relayInfo *relaycommon.RelayInfo, quota int) error {
 
 type postConsumeQuotaResult struct {
 	FundingApplied bool
-	TokenApplied   bool
 }
 
 func PostConsumeQuota(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool) error {
-	_, err := postConsumeQuotaWithResult(relayInfo, quota, preConsumedQuota, sendEmail)
+	_, err := postConsumeQuotaWithResult(relayInfo, quota, preConsumedQuota, sendEmail, true)
 	return err
 }
 
-func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool) (result postConsumeQuotaResult, err error) {
+func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, preConsumedQuota int, sendEmail bool, settleToken bool) (result postConsumeQuotaResult, err error) {
+	if relayInfo == nil {
+		return result, errors.New("relay info is nil")
+	}
+	if relayInfo.OrganizationId > 0 {
+		return result, model.ErrOrganizationLedgerRequired
+	}
 
 	// 1) Consume from wallet quota OR subscription item
-	if relayInfo != nil && relayInfo.BillingSource == BillingSourceSubscription {
+	if relayInfo.BillingSource == BillingSourceSubscription {
 		if relayInfo.SubscriptionId == 0 {
 			return result, errors.New("subscription id is missing")
 		}
@@ -443,7 +455,7 @@ func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, pre
 	}
 	result.FundingApplied = true
 
-	if !relayInfo.IsPlayground {
+	if settleToken && !relayInfo.IsPlayground {
 		if quota > 0 {
 			err = model.DecreaseTokenQuota(relayInfo.TokenId, relayInfo.TokenKey, quota)
 		} else {
@@ -452,7 +464,6 @@ func postConsumeQuotaWithResult(relayInfo *relaycommon.RelayInfo, quota int, pre
 		if err != nil {
 			return result, err
 		}
-		result.TokenApplied = true
 	}
 
 	if sendEmail {

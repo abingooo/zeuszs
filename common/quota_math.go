@@ -27,11 +27,11 @@ const (
 )
 
 // QuotaClamp describes a single saturation event: a quota conversion whose
-// input fell outside the representable int32 range (or was NaN) and was
+// input fell outside its persisted counter domain (or was NaN) and was
 // therefore clamped. It is surfaced to billing callers so the event can be
 // recorded on the related consume/task log for admin auditing.
 type QuotaClamp struct {
-	Op       string         `json:"op"`       // "QuotaFromFloat" | "QuotaRound" | "QuotaFromDecimal"
+	Op       string         `json:"op"`       // conversion or persisted-counter operation
 	Kind     QuotaClampKind `json:"kind"`     // "overflow" | "underflow" | "nan"
 	Original float64        `json:"original"` // best-effort pre-clamp value (decimal -> float64 approx)
 	Clamped  int            `json:"clamped"`  // the saturated result actually used
@@ -151,4 +151,34 @@ func QuotaFromDecimalChecked(d decimal.Decimal) (int, *QuotaClamp) {
 // value that would otherwise be saturated at the database's int32 boundary.
 func QuotaFromDecimalStrict(d decimal.Decimal) (int, error) {
 	return strictQuota(QuotaFromDecimalChecked(d))
+}
+
+// SaturatingInt32CounterAddChecked applies a delta to a persisted, non-negative
+// int32 accounting counter. Accumulated usage can legitimately approach the
+// storage boundary over many requests even when every individual charge is
+// valid, so use an int64 intermediate and clamp instead of asking the database
+// to evaluate an overflowing int32 expression. Refund deltas floor at zero.
+func SaturatingInt32CounterAddChecked(current int, delta int) (int, *QuotaClamp) {
+	total := int64(current) + int64(delta)
+	var clamp *QuotaClamp
+	switch {
+	case total > int64(MaxQuota):
+		clamp = &QuotaClamp{
+			Op:       "SaturatingInt32CounterAdd",
+			Kind:     QuotaClampOverflow,
+			Original: float64(total),
+			Clamped:  MaxQuota,
+		}
+	case total < 0:
+		clamp = &QuotaClamp{
+			Op:       "SaturatingInt32CounterAdd",
+			Kind:     QuotaClampUnderflow,
+			Original: float64(total),
+			Clamped:  0,
+		}
+	default:
+		return int(total), nil
+	}
+	SysError(clamp.Error())
+	return clamp.Clamped, clamp
 }

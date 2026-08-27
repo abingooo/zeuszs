@@ -36,6 +36,8 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	recoveryCutoff := time.Now().Add(-service.MidjourneySubmissionRecoveryDelay).UnixMilli()
+	service.RecoverMidjourneyBilling(ctx, recoveryCutoff, 100)
 
 	tasks := model.GetAllUnFinishTasks()
 	if len(tasks) == 0 {
@@ -90,13 +92,31 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 		midjourneyChannel, err := model.CacheGetChannel(channelId)
 		if err != nil {
 			logger.LogError(ctx, fmt.Sprintf("CacheGetChannel: %v", err))
-			err := model.MjBulkUpdate(taskIds, map[string]any{
-				"fail_reason": fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId),
-				"status":      "FAILURE",
-				"progress":    "100%",
-			})
-			if err != nil {
-				logger.LogInfo(ctx, fmt.Sprintf("UpdateMidjourneyTask error: %v", err))
+			reason := fmt.Sprintf("获取渠道信息失败，请联系管理员，渠道ID：%d", channelId)
+			for _, taskId := range taskIds {
+				task := taskM[taskId]
+				if task == nil {
+					continue
+				}
+				preStatus := task.Status
+				task.Status = "FAILURE"
+				task.Progress = "100%"
+				task.FailReason = reason
+				if task.Quota != 0 && task.OrganizationId > 0 {
+					refunded, refundErr := task.FailAndRefundOrganizationBilling(preStatus, reason)
+					if refundErr != nil {
+						logger.LogError(ctx, fmt.Sprintf("refund Midjourney task %s after channel lookup failure: %v", taskId, refundErr))
+					} else if !refunded {
+						logger.LogWarn(ctx, fmt.Sprintf("Midjourney task %s channel failure CAS lost, skip refund", taskId))
+					}
+					continue
+				}
+				won, updateErr := task.UpdateWithStatus(preStatus)
+				if updateErr != nil {
+					logger.LogError(ctx, fmt.Sprintf("mark Midjourney task %s failed after channel lookup: %v", taskId, updateErr))
+				} else if won && task.Quota != 0 {
+					service.RefundMidjourneyQuota(ctx, task, reason)
+				}
 			}
 			continue
 		}
@@ -208,6 +228,15 @@ func runMidjourneyTaskUpdateOnce(ctx context.Context, report func(processed, tot
 				if task.Quota != 0 {
 					shouldReturnQuota = true
 				}
+			}
+			if shouldReturnQuota && task.OrganizationId > 0 {
+				refunded, err := task.FailAndRefundOrganizationBilling(preStatus, task.FailReason)
+				if err != nil {
+					logger.LogError(ctx, "UpdateMidjourneyTask organization refund error: "+err.Error())
+				} else if !refunded {
+					logger.LogWarn(ctx, fmt.Sprintf("Midjourney task %s terminal CAS lost, skip refund", task.MjId))
+				}
+				continue
 			}
 			won, err := task.UpdateWithStatus(preStatus)
 			if err != nil {

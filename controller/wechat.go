@@ -6,12 +6,16 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type wechatLoginResponse struct {
@@ -19,6 +23,8 @@ type wechatLoginResponse struct {
 	Message string `json:"message"`
 	Data    string `json:"data"`
 }
+
+const wechatOrganizationInviteHeader = "X-Organization-Invite-Code"
 
 func getWeChatIdByCode(code string) (string, error) {
 	if code == "" {
@@ -68,9 +74,7 @@ func WeChatAuth(c *gin.Context) {
 		})
 		return
 	}
-	user := model.User{
-		WeChatId: wechatId,
-	}
+	user := model.User{WeChatId: wechatId}
 	if model.IsWeChatIdAlreadyTaken(wechatId) {
 		err := user.FillUserByWeChatId()
 		if err != nil {
@@ -89,18 +93,44 @@ func WeChatAuth(c *gin.Context) {
 		}
 	} else {
 		if common.RegisterEnabled {
+			organizationInviteCode := service.NormalizeOrganizationInviteCode(c.GetHeader(wechatOrganizationInviteHeader))
+			if len(organizationInviteCode) > 128 {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "无效的组织邀请码",
+				})
+				return
+			}
 			user.Username = "wechat_" + strconv.Itoa(model.GetMaxUserId()+1)
 			user.DisplayName = "WeChat User"
 			user.Role = common.RoleCommonUser
 			user.Status = common.UserStatusEnabled
-
-			if err := user.Insert(0); err != nil {
+			registration, err := service.RegisterUser(service.UserRegistrationParams{
+				User:                   &user,
+				AffiliateCode:          strings.TrimSpace(c.Query("aff")),
+				OrganizationInviteCode: organizationInviteCode,
+				RequestID:              c.GetString(common.RequestIdKey),
+				GenerateDefaultToken:   constant.GenerateDefaultToken,
+				AfterCreateTx: func(tx *gorm.DB, createdUser *model.User) error {
+					return model.ClaimExternalIdentityWithTx(tx, model.ExternalIdentityProviderWeChat, wechatId, createdUser.Id)
+				},
+			})
+			if err != nil {
 				c.JSON(http.StatusOK, gin.H{
 					"success": false,
 					"message": err.Error(),
 				})
 				return
 			}
+			if registration == nil {
+				c.JSON(http.StatusOK, gin.H{
+					"success": false,
+					"message": "创建用户失败",
+				})
+				return
+			}
+			user = registration.User
+			service.FinalizeRegisteredUser(registration)
 		} else {
 			c.JSON(http.StatusOK, gin.H{
 				"success": false,
@@ -161,8 +191,24 @@ func WeChatBind(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "未登录"})
 		return
 	}
-	// 只更新绑定列，避免完整用户快照覆盖并发的封禁、降权或分组变更。
-	if err := model.UpdateUserBindColumn(userId, "wechat_id", wechatId); err != nil {
+	// Claim the external identity and update only the binding column in one
+	// transaction. The claim gives concurrent bind/login requests a durable
+	// single-owner fence without writing a stale user snapshot.
+	if err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if err := model.ClaimExternalIdentityWithTx(tx, model.ExternalIdentityProviderWeChat, wechatId, userId); err != nil {
+			return err
+		}
+		result := tx.Model(&model.User{}).
+			Where("id = ? AND wechat_id = ?", userId, "").
+			Update("wechat_id", wechatId)
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return errors.New("该微信账号已被绑定")
+		}
+		return nil
+	}); err != nil {
 		common.ApiError(c, err)
 		return
 	}

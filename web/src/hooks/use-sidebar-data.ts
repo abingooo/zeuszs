@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { Building03Icon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import {
   Activity,
   Box,
@@ -32,10 +34,19 @@ import {
   Users,
   Wallet,
 } from 'lucide-react'
+import { createElement } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { SidebarData } from '@/components/layout/types'
 import { ROLE } from '@/lib/roles'
+
+function OrganizationsNavIcon(props: { className?: string }) {
+  return createElement(HugeiconsIcon, {
+    icon: Building03Icon,
+    strokeWidth: 2,
+    className: props.className,
+  })
+}
 
 /**
  * Root navigation groups for the application sidebar.
@@ -91,6 +102,11 @@ export function useSidebarData(): SidebarData {
             icon: Wallet,
           },
           {
+            title: t('My organization'),
+            url: '/organization',
+            icon: OrganizationsNavIcon,
+          },
+          {
             title: t('Profile'),
             url: '/profile',
             icon: User,
@@ -115,6 +131,11 @@ export function useSidebarData(): SidebarData {
             title: t('Users'),
             url: '/users',
             icon: Users,
+          },
+          {
+            title: t('Organizations'),
+            url: '/organizations',
+            icon: OrganizationsNavIcon,
           },
           {
             title: t('Redemption Codes'),

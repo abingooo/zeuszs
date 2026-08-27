@@ -15,7 +15,9 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -95,9 +97,13 @@ func signTelegramAuthorization(token string, params url.Values) {
 
 func createTelegramBindTestFlow(t *testing.T, db *gorm.DB, name string, status int, now time.Time) (*model.User, string) {
 	t.Helper()
+	var organization model.Organization
+	require.NoError(t, db.First(&organization).Error)
 	user := &model.User{
 		Username: name, Password: "password-placeholder", Role: common.RoleCommonUser,
 		Status: status, Group: "default", AuthVersion: 1, AffCode: name,
+		OrganizationId: organization.Id, OrganizationRole: model.OrganizationRoleMember,
+		OrganizationStatus: model.OrganizationMemberStatusActive,
 	}
 	require.NoError(t, db.Create(user).Error)
 	session := &model.UserSession{
@@ -166,6 +172,7 @@ func TestTelegramBindCommitsFlowAssertionAndBindingAtomically(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(
+		&model.Organization{},
 		&model.User{},
 		&model.UserSession{},
 		&model.AuthFlow{},
@@ -186,9 +193,16 @@ func TestTelegramBindCommitsFlowAssertionAndBindingAtomically(t *testing.T) {
 		common.SessionSecret = previousSecret
 	})
 
+	organization := &model.Organization{
+		Name: "Telegram Bind Organization", Status: model.OrganizationStatusActive,
+		OwnerUserId: 1001, PolicyVersion: 1,
+	}
+	require.NoError(t, db.Create(organization).Error)
 	user := &model.User{
 		Username: "telegram-bind-user", Password: "password-placeholder", Role: common.RoleCommonUser,
 		Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1, AffCode: "telegram-bind-user",
+		OrganizationId: organization.Id, OrganizationRole: model.OrganizationRoleMember,
+		OrganizationStatus: model.OrganizationMemberStatusActive,
 	}
 	require.NoError(t, db.Create(user).Error)
 	now := time.Now()
@@ -273,6 +287,8 @@ func TestTelegramBindCommitsFlowAssertionAndBindingAtomically(t *testing.T) {
 	competingUser := &model.User{
 		Username: "telegram-bind-competing-user", Password: "password-placeholder", Role: common.RoleCommonUser,
 		Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1, AffCode: "telegram-bind-competing-user",
+		OrganizationId: organization.Id, OrganizationRole: model.OrganizationRoleMember,
+		OrganizationStatus: model.OrganizationMemberStatusActive,
 	}
 	require.NoError(t, db.Create(competingUser).Error)
 	competingSession := &model.UserSession{
@@ -406,4 +422,131 @@ func TestTelegramBindCommitsFlowAssertionAndBindingAtomically(t *testing.T) {
 		internalAssertionExpiry,
 	))
 
+}
+
+func TestTelegramLoginRegistersNewUserInDefaultOrganization(t *testing.T) {
+	previousDB, previousLogDB := model.DB, model.LOG_DB
+	previousMainType, previousLogType := common.MainDatabaseType(), common.LogDatabaseType()
+	previousRedis := common.RedisEnabled
+	previousEnabled := common.TelegramOAuthEnabled
+	previousRegisterEnabled := common.RegisterEnabled
+	previousToken := common.TelegramBotToken
+	previousSecret := common.SessionSecret
+	previousNewUserQuota := common.QuotaForNewUser
+	previousDefaultToken := constant.GenerateDefaultToken
+
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(
+		&model.Organization{},
+		&model.OrganizationInvite{},
+		&model.OrganizationInviteUse{},
+		&model.OrganizationFundAccount{},
+		&model.OrganizationMemberFund{},
+		&model.OrganizationQuotaLedger{},
+		&model.OrganizationQuotaOperation{},
+		&model.OrganizationWalletReservation{},
+		&model.OrganizationAuditEvent{},
+		&model.User{},
+		&model.Token{},
+		&model.UserSession{},
+		&model.AuthFlow{},
+		&model.ExternalIdentityClaim{},
+		&model.Log{},
+	))
+	defaultKey := model.DefaultOrganizationSystemKey
+	require.NoError(t, db.Create(&model.Organization{
+		Name: "Default", SystemKey: &defaultKey, Status: model.OrganizationStatusActive,
+		OwnerUserId: 1, AllowMemberTopup: true, PolicyVersion: 1,
+	}).Error)
+	var organization model.Organization
+	require.NoError(t, db.Where("system_key = ?", model.DefaultOrganizationSystemKey).First(&organization).Error)
+	require.NoError(t, db.Create(&model.OrganizationFundAccount{OrganizationId: organization.Id}).Error)
+
+	model.DB, model.LOG_DB = db, db
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	common.RedisEnabled = false
+	common.TelegramOAuthEnabled = true
+	common.RegisterEnabled = true
+	common.TelegramBotToken = "telegram-registration-test-token"
+	common.SessionSecret = "telegram-registration-session-secret"
+	common.QuotaForNewUser = 1234
+	constant.GenerateDefaultToken = false
+	t.Cleanup(func() {
+		model.DB, model.LOG_DB = previousDB, previousLogDB
+		common.SetDatabaseTypes(previousMainType, previousLogType)
+		common.RedisEnabled = previousRedis
+		common.TelegramOAuthEnabled = previousEnabled
+		common.RegisterEnabled = previousRegisterEnabled
+		common.TelegramBotToken = previousToken
+		common.SessionSecret = previousSecret
+		common.QuotaForNewUser = previousNewUserQuota
+		constant.GenerateDefaultToken = previousDefaultToken
+	})
+
+	now := time.Now()
+	params := signedTelegramAuthorization(common.TelegramBotToken, now)
+	router := gin.New()
+	router.GET("/api/oauth/telegram/login", TelegramLogin)
+	request := httptest.NewRequest(http.MethodGet, "/api/oauth/telegram/login?"+params.Encode(), nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code)
+	assert.Contains(t, response.Body.String(), `"success":true`)
+
+	var user model.User
+	require.NoError(t, db.Where("telegram_id = ?", "123456").First(&user).Error)
+	assert.Equal(t, organization.Id, user.OrganizationId)
+	assert.Equal(t, model.OrganizationRoleMember, user.OrganizationRole)
+	assert.Equal(t, model.OrganizationMemberStatusActive, user.OrganizationStatus)
+	assert.Equal(t, 1234, user.Quota)
+	var claim model.ExternalIdentityClaim
+	require.NoError(t, db.Where("provider = ? AND subject = ?", model.ExternalIdentityProviderTelegram, "123456").First(&claim).Error)
+	assert.Equal(t, user.Id, claim.UserId)
+
+	invitedOrganization := model.Organization{
+		Name: "Invited", Status: model.OrganizationStatusActive,
+		OwnerUserId: 1002, AllowMemberTopup: true, PolicyVersion: 1,
+	}
+	require.NoError(t, db.Create(&invitedOrganization).Error)
+	require.NoError(t, db.Create(&model.OrganizationFundAccount{OrganizationId: invitedOrganization.Id}).Error)
+	const organizationInviteCode = "TELEGRAM-ORG-CODE"
+	organizationInvite := model.OrganizationInvite{
+		OrganizationId: invitedOrganization.Id,
+		CodeHash:       service.HashOrganizationInviteCode(organizationInviteCode),
+		CodePrefix:     "TELEGRAM",
+		Status:         model.OrganizationInviteStatusActive,
+		MaxUses:        1,
+		DefaultRole:    model.OrganizationRoleMember,
+		CreatedBy:      1002,
+	}
+	require.NoError(t, db.Create(&organizationInvite).Error)
+	invitedParams := signedTelegramAuthorization(common.TelegramBotToken, now)
+	invitedParams.Set("id", "654321")
+	signTelegramAuthorization(common.TelegramBotToken, invitedParams)
+	request = httptest.NewRequest(http.MethodGet, "/api/oauth/telegram/login?"+invitedParams.Encode(), nil)
+	request.Header.Set(telegramOrganizationInviteHeader, organizationInviteCode)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	require.Equal(t, http.StatusOK, response.Code)
+	assert.Contains(t, response.Body.String(), `"success":true`)
+
+	var invitedUser model.User
+	require.NoError(t, db.Where("telegram_id = ?", "654321").First(&invitedUser).Error)
+	assert.Equal(t, invitedOrganization.Id, invitedUser.OrganizationId)
+	assert.Equal(t, model.OrganizationRoleMember, invitedUser.OrganizationRole)
+	var inviteUse model.OrganizationInviteUse
+	require.NoError(t, db.Where("user_id = ?", invitedUser.Id).First(&inviteUse).Error)
+	assert.Equal(t, organizationInvite.Id, inviteUse.OrganizationInviteId)
+	require.NoError(t, db.First(&organizationInvite, organizationInvite.Id).Error)
+	assert.Equal(t, 1, organizationInvite.UsedCount)
+
+	// The signed assertion is one-time even after the account has been created.
+	request = httptest.NewRequest(http.MethodGet, "/api/oauth/telegram/login?"+params.Encode(), nil)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	assert.Equal(t, http.StatusForbidden, response.Code)
+	var userCount int64
+	require.NoError(t, db.Model(&model.User{}).Count(&userCount).Error)
+	assert.Equal(t, int64(2), userCount)
 }

@@ -32,7 +32,7 @@ func setupAuthSessionTestDB(t *testing.T) *model.User {
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.AuthFlow{}))
+	require.NoError(t, db.AutoMigrate(&model.Organization{}, &model.User{}, &model.UserSession{}, &model.AuthFlow{}))
 	model.DB = db
 	common.RedisEnabled = false
 	common.UserSessionActiveLimit = common.DefaultUserSessionActiveLimit
@@ -50,13 +50,23 @@ func setupAuthSessionTestDB(t *testing.T) *model.User {
 		common.UserSessionHourlyAlertThreshold = previousAlertThreshold
 		_ = sqlDB.Close()
 	})
+	organization := &model.Organization{
+		Name:          "Session Organization",
+		Status:        model.OrganizationStatusActive,
+		OwnerUserId:   1001,
+		PolicyVersion: 1,
+	}
+	require.NoError(t, db.Create(organization).Error)
 	user := &model.User{
-		Username:    "session-user",
-		Password:    "unused-password-hash",
-		Role:        common.RoleCommonUser,
-		Status:      common.UserStatusEnabled,
-		Group:       "default",
-		AuthVersion: 1,
+		Username:           "session-user",
+		Password:           "unused-password-hash",
+		Role:               common.RoleCommonUser,
+		Status:             common.UserStatusEnabled,
+		Group:              "default",
+		AuthVersion:        1,
+		OrganizationId:     organization.Id,
+		OrganizationRole:   model.OrganizationRoleMember,
+		OrganizationStatus: model.OrganizationMemberStatusActive,
 	}
 	require.NoError(t, db.Create(user).Error)
 	return user
@@ -353,6 +363,128 @@ func TestLoginSessionCreateRefreshAndRevoke(t *testing.T) {
 	require.NoError(t, RevokeByRefreshToken(refreshed.RefreshToken, refreshed.Session.SID, "logout"))
 	_, _, err = ValidateLoginSession(identity)
 	assert.True(t, errors.Is(err, ErrLoginSessionRevoked))
+}
+
+func TestCommonUserOrganizationStateBlocksSessionCreation(t *testing.T) {
+	tests := []struct {
+		name        string
+		disable     func(t *testing.T, user *model.User)
+		expectedErr error
+	}{
+		{
+			name: "membership disabled",
+			disable: func(t *testing.T, user *model.User) {
+				t.Helper()
+				require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).
+					Update("organization_status", model.OrganizationMemberStatusDisabled).Error)
+			},
+			expectedErr: ErrOrganizationMembershipInactive,
+		},
+		{
+			name: "organization disabled",
+			disable: func(t *testing.T, user *model.User) {
+				t.Helper()
+				require.NoError(t, model.DB.Model(&model.Organization{}).Where("id = ?", user.OrganizationId).
+					Update("status", model.OrganizationStatusDisabled).Error)
+			},
+			expectedErr: ErrOrganizationInactive,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			useTestSessionSecret(t)
+			user := setupAuthSessionTestDB(t)
+			test.disable(t, user)
+
+			_, err := CreateLoginSession(user.Id, "password", "127.0.0.1", "test-agent")
+			assert.ErrorIs(t, err, test.expectedErr)
+			var sessionCount int64
+			require.NoError(t, model.DB.Model(&model.UserSession{}).Count(&sessionCount).Error)
+			assert.Zero(t, sessionCount)
+		})
+	}
+}
+
+func TestCommonUserOrganizationStateBlocksSessionValidationAndRefresh(t *testing.T) {
+	tests := []struct {
+		name        string
+		disable     func(t *testing.T, user *model.User)
+		validateErr error
+	}{
+		{
+			name: "membership disabled",
+			disable: func(t *testing.T, user *model.User) {
+				t.Helper()
+				require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).
+					Update("organization_status", model.OrganizationMemberStatusDisabled).Error)
+			},
+			validateErr: ErrOrganizationMembershipInactive,
+		},
+		{
+			name: "organization disabled",
+			disable: func(t *testing.T, user *model.User) {
+				t.Helper()
+				require.NoError(t, model.DB.Model(&model.Organization{}).Where("id = ?", user.OrganizationId).
+					Update("status", model.OrganizationStatusDisabled).Error)
+			},
+			validateErr: ErrOrganizationInactive,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			useTestSessionSecret(t)
+			user := setupAuthSessionTestDB(t)
+			bundle, err := CreateLoginSession(user.Id, "password", "127.0.0.1", "test-agent")
+			require.NoError(t, err)
+			identity, err := ParseAccessToken(bundle.AccessToken)
+			require.NoError(t, err)
+			test.disable(t, user)
+
+			_, _, err = ValidateLoginSession(identity)
+			assert.ErrorIs(t, err, test.validateErr)
+			_, _, err = RefreshLoginSession(bundle.RefreshToken, bundle.Session.SID, "127.0.0.2", "test-agent-2")
+			assert.ErrorIs(t, err, ErrLoginSessionRevoked)
+			stored, err := model.GetUserSessionBySID(bundle.Session.SID)
+			require.NoError(t, err)
+			assert.Equal(t, model.UserSessionStatusRevoked, stored.Status)
+		})
+	}
+}
+
+func TestPlatformRolesRetainSessionRecoveryWhileGeneralValidationStaysStrict(t *testing.T) {
+	roles := []struct {
+		name string
+		role int
+	}{
+		{name: "admin", role: common.RoleAdminUser},
+		{name: "root", role: common.RoleRootUser},
+	}
+	for _, test := range roles {
+		t.Run(test.name, func(t *testing.T) {
+			useTestSessionSecret(t)
+			user := setupAuthSessionTestDB(t)
+			require.NoError(t, model.DB.Model(&model.User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+				"role":                test.role,
+				"organization_status": model.OrganizationMemberStatusDisabled,
+			}).Error)
+			require.NoError(t, model.DB.Model(&model.Organization{}).Where("id = ?", user.OrganizationId).
+				Update("status", model.OrganizationStatusDisabled).Error)
+
+			bundle, err := CreateLoginSession(user.Id, "password", "127.0.0.1", "test-agent")
+			require.NoError(t, err)
+			identity, err := ParseAccessToken(bundle.AccessToken)
+			require.NoError(t, err)
+			_, _, err = ValidateLoginSession(identity)
+			assert.ErrorIs(t, err, ErrOrganizationMembershipInactive)
+			_, recoveredUser, err := ValidatePlatformLoginSession(identity)
+			require.NoError(t, err)
+			assert.Equal(t, test.role, recoveredUser.Role)
+
+			refreshed, _, err := RefreshLoginSession(bundle.RefreshToken, bundle.Session.SID, "127.0.0.2", "test-agent-2")
+			require.NoError(t, err)
+			assert.NotEqual(t, bundle.RefreshToken, refreshed.RefreshToken)
+		})
+	}
 }
 
 func TestIndependentRedisSessionRevokeConvergesAfterCacheTTL(t *testing.T) {

@@ -124,3 +124,36 @@ func TestQuotaFromDecimalChecked(t *testing.T) {
 		assert.Equal(t, QuotaClampOverflow, clamp.Kind)
 	}
 }
+
+func TestSaturatingInt32CounterAddChecked(t *testing.T) {
+	tests := []struct {
+		name        string
+		current     int
+		delta       int
+		want        int
+		wantKind    QuotaClampKind
+		wantClamped bool
+	}{
+		{name: "positive delta", current: 40, delta: 2, want: 42},
+		{name: "refund delta", current: 42, delta: -2, want: 40},
+		{name: "exact upper bound", current: MaxQuota - 2, delta: 2, want: MaxQuota},
+		{name: "overflow", current: MaxQuota - 2, delta: 3, want: MaxQuota, wantKind: QuotaClampOverflow, wantClamped: true},
+		{name: "refund exact zero", current: 2, delta: -2, want: 0},
+		{name: "refund underflow", current: 2, delta: -3, want: 0, wantKind: QuotaClampUnderflow, wantClamped: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, clamp := SaturatingInt32CounterAddChecked(test.current, test.delta)
+			assert.Equal(t, test.want, got)
+			if !test.wantClamped {
+				assert.Nil(t, clamp)
+				return
+			}
+			require.NotNil(t, clamp)
+			assert.Equal(t, "SaturatingInt32CounterAdd", clamp.Op)
+			assert.Equal(t, test.wantKind, clamp.Kind)
+			assert.Equal(t, test.want, clamp.Clamped)
+		})
+	}
+}

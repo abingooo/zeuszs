@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -24,9 +25,10 @@ import (
 const (
 	// The legacy Telegram widget has no nonce. Keep its signed assertion short-lived
 	// so captured callbacks cannot be reused indefinitely.
-	telegramAuthorizationMaxAge     = 5 * time.Minute
-	telegramAuthorizationFutureSkew = 2 * time.Minute
-	telegramBindFlowTTL             = 5 * time.Minute
+	telegramAuthorizationMaxAge      = 5 * time.Minute
+	telegramAuthorizationFutureSkew  = 2 * time.Minute
+	telegramBindFlowTTL              = 5 * time.Minute
+	telegramOrganizationInviteHeader = "X-Organization-Invite-Code"
 
 	telegramBindErrorDisabled       = "TELEGRAM_BIND_DISABLED"
 	telegramBindErrorInvalidRequest = "TELEGRAM_BIND_INVALID_REQUEST"
@@ -252,21 +254,96 @@ func TelegramLogin(c *gin.Context) {
 		return
 	}
 
-	user := model.User{TelegramId: telegramId}
-	if err := user.FillUserByTelegramId(); err != nil {
-		c.JSON(200, gin.H{
-			"message": err.Error(),
+	var user model.User
+	lookupErr := model.DB.Where("telegram_id = ?", telegramId).First(&user).Error
+	if lookupErr != nil && !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"message": lookupErr.Error(),
 			"success": false,
 		})
 		return
 	}
-	if err := claimTelegramAuthorization(params, time.Now()); err != nil {
-		common.SysLog("TelegramLogin assertion replay rejected: " + err.Error())
-		c.JSON(http.StatusForbidden, gin.H{
-			"message": "该登录凭据已被使用",
-			"success": false,
+	if errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+		if !common.RegisterEnabled {
+			c.JSON(http.StatusOK, gin.H{
+				"message": "管理员关闭了新用户注册",
+				"success": false,
+			})
+			return
+		}
+		organizationInviteCode := service.NormalizeOrganizationInviteCode(c.GetHeader(telegramOrganizationInviteHeader))
+		if len(organizationInviteCode) > 128 {
+			c.JSON(http.StatusOK, gin.H{
+				"message": "无效的组织邀请码",
+				"success": false,
+			})
+			return
+		}
+
+		// Consume the signed assertion in the same transaction as account
+		// creation. This prevents a replay or concurrent callback from creating
+		// more than one account for the same Telegram authorization.
+		candidate := model.User{
+			Username:    "telegram_" + strconv.Itoa(model.GetMaxUserId()+1),
+			DisplayName: "Telegram User",
+			TelegramId:  telegramId,
+			Role:        common.RoleCommonUser,
+			Status:      common.UserStatusEnabled,
+		}
+		var registration *service.UserRegistrationResult
+		err := model.DB.Transaction(func(tx *gorm.DB) error {
+			assertion, assertionExpiresAt, err := telegramAuthorizationClaim(params, time.Now())
+			if err != nil {
+				return err
+			}
+			if err := model.ClaimExternalAuthAssertionWithTx(tx, model.AuthFlowPurposeTelegramAssertion, assertion, assertionExpiresAt); err != nil {
+				return err
+			}
+			var existing model.User
+			if err := tx.Where("telegram_id = ?", telegramId).First(&existing).Error; err == nil {
+				return errTelegramAccountAlreadyBound
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+			registration, err = service.RegisterUserWithTx(tx, service.UserRegistrationParams{
+				User:                   &candidate,
+				OrganizationInviteCode: organizationInviteCode,
+				RequestID:              c.GetString(common.RequestIdKey),
+				GenerateDefaultToken:   constant.GenerateDefaultToken,
+				AfterCreateTx: func(tx *gorm.DB, createdUser *model.User) error {
+					return model.ClaimExternalIdentityWithTx(tx, model.ExternalIdentityProviderTelegram, telegramId, createdUser.Id)
+				},
+			})
+			return err
 		})
-		return
+		if err != nil {
+			if errors.Is(err, model.ErrAuthFlowConsumed) {
+				common.SysLog("TelegramLogin assertion replay rejected: " + err.Error())
+				c.JSON(http.StatusForbidden, gin.H{"message": "该登录凭据已被使用", "success": false})
+				return
+			}
+			if errors.Is(err, errTelegramAccountAlreadyBound) {
+				c.JSON(http.StatusOK, gin.H{"message": "该 Telegram 账户已绑定", "success": false})
+				return
+			}
+			c.JSON(http.StatusOK, gin.H{"message": err.Error(), "success": false})
+			return
+		}
+		if registration == nil {
+			c.JSON(http.StatusOK, gin.H{"message": "创建用户失败", "success": false})
+			return
+		}
+		user = registration.User
+		service.FinalizeRegisteredUser(registration)
+	} else {
+		if err := claimTelegramAuthorization(params, time.Now()); err != nil {
+			common.SysLog("TelegramLogin assertion replay rejected: " + err.Error())
+			c.JSON(http.StatusForbidden, gin.H{
+				"message": "该登录凭据已被使用",
+				"success": false,
+			})
+			return
+		}
 	}
 	setupLogin(&user, c)
 }

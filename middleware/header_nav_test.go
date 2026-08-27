@@ -50,7 +50,7 @@ func performHeaderNavRequest(t *testing.T, handler gin.HandlerFunc, authenticate
 		previousDB, previousRedis := model.DB, common.RedisEnabled
 		db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 		require.NoError(t, err)
-		require.NoError(t, db.AutoMigrate(&model.User{}))
+		require.NoError(t, db.AutoMigrate(&model.Organization{}, &model.User{}))
 		model.DB = db
 		common.RedisEnabled = false
 		t.Cleanup(func() {
@@ -58,13 +58,21 @@ func performHeaderNavRequest(t *testing.T, handler gin.HandlerFunc, authenticate
 			common.RedisEnabled = previousRedis
 		})
 		accessToken = "header-nav-pat"
+		organization := model.Organization{
+			Name: "Header Navigation Organization", Status: model.OrganizationStatusActive,
+			OwnerUserId: 1001, PolicyVersion: 1,
+		}
+		require.NoError(t, db.Create(&organization).Error)
 		user := model.User{
-			Username:    "tester",
-			Password:    "unused-password-hash",
-			Role:        common.RoleCommonUser,
-			Status:      common.UserStatusEnabled,
-			Group:       "default",
-			AuthVersion: 1,
+			Username:           "tester",
+			Password:           "unused-password-hash",
+			Role:               common.RoleCommonUser,
+			Status:             common.UserStatusEnabled,
+			Group:              "default",
+			AuthVersion:        1,
+			OrganizationId:     organization.Id,
+			OrganizationRole:   model.OrganizationRoleMember,
+			OrganizationStatus: model.OrganizationMemberStatusActive,
 		}
 		user.SetAccessToken(accessToken)
 		require.NoError(t, db.Create(&user).Error)

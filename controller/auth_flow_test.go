@@ -223,3 +223,69 @@ func TestOAuthBindProviderErrorConsumesSessionBoundFlow(t *testing.T) {
 	assert.Zero(t, provider.exchangeCalls)
 	assert.Zero(t, provider.userInfoCalls)
 }
+
+func TestOAuthRegistrationFailureRollsBackStateConsumption(t *testing.T) {
+	previousDB, previousLogDB := model.DB, model.LOG_DB
+	previousMainType, previousLogType := common.MainDatabaseType(), common.LogDatabaseType()
+	previousRegisterEnabled := common.RegisterEnabled
+	previousRedisEnabled := common.RedisEnabled
+	previousSessionSecret := common.SessionSecret
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(
+		&model.Organization{},
+		&model.OrganizationFundAccount{},
+		&model.OrganizationMemberFund{},
+		&model.OrganizationQuotaLedger{},
+		&model.OrganizationQuotaOperation{},
+		&model.OrganizationWalletReservation{},
+		&model.OrganizationAuditEvent{},
+		&model.User{},
+		&model.Token{},
+		&model.AuthFlow{},
+	))
+	defaultKey := model.DefaultOrganizationSystemKey
+	require.NoError(t, db.Create(&model.Organization{
+		Name: "Default", SystemKey: &defaultKey, Status: model.OrganizationStatusActive,
+		OwnerUserId: 1, AllowMemberTopup: true, PolicyVersion: 1,
+	}).Error)
+	var organization model.Organization
+	require.NoError(t, db.Where("system_key = ?", model.DefaultOrganizationSystemKey).First(&organization).Error)
+	require.NoError(t, db.Create(&model.OrganizationFundAccount{OrganizationId: organization.Id}).Error)
+	model.DB, model.LOG_DB = db, db
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
+	common.RegisterEnabled = true
+	common.RedisEnabled = false
+	common.SessionSecret = "oauth-registration-test-secret"
+	provider := &authFlowTestOAuthProvider{}
+	oauth.Register("oauth-registration-test", provider)
+	t.Cleanup(func() {
+		oauth.Unregister("oauth-registration-test")
+		model.DB, model.LOG_DB = previousDB, previousLogDB
+		common.SetDatabaseTypes(previousMainType, previousLogType)
+		common.RegisterEnabled = previousRegisterEnabled
+		common.RedisEnabled = previousRedisEnabled
+		common.SessionSecret = previousSessionSecret
+	})
+
+	flowToken, _, err := model.CreateAuthFlow(model.AuthFlowCreate{
+		Purpose: model.AuthFlowPurposeOAuth, Provider: "oauth-registration-test", Intent: model.AuthFlowIntentLogin,
+		Payload: `{"organization_invite_code":"missing-invite"}`, ExpiresAt: time.Now().Add(time.Minute),
+	})
+	require.NoError(t, err)
+	router := gin.New()
+	router.GET("/api/oauth/:provider", HandleOAuth)
+	request := httptest.NewRequest(http.MethodGet, "/api/oauth/oauth-registration-test?state="+flowToken+"&code=test", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	assert.Contains(t, response.Body.String(), `"success":false`)
+	flow, err := model.GetAuthFlow(flowToken, model.AuthFlowMatch{
+		Purpose: model.AuthFlowPurposeOAuth, Provider: "oauth-registration-test", Intent: model.AuthFlowIntentLogin,
+	})
+	require.NoError(t, err)
+	assert.Nil(t, flow.ConsumedAt)
+	var userCount int64
+	require.NoError(t, db.Model(&model.User{}).Count(&userCount).Error)
+	assert.Zero(t, userCount)
+}

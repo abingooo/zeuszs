@@ -77,53 +77,59 @@ func resolveUserSortOptions(sortOptions []UserSortOptions) UserSortOptions {
 // User if you add sensitive fields, don't forget to clean them in setupLogin function.
 // Otherwise, the sensitive information will be saved on local storage in plain text!
 type User struct {
-	Id               int                        `json:"id"`
-	Username         string                     `json:"username" gorm:"unique;index" validate:"max=20"`
-	Password         string                     `json:"password" gorm:"not null;" validate:"min=8,max=20"`
-	OriginalPassword string                     `json:"original_password" gorm:"-:all"` // this field is only for Password change verification, don't save it to database!
-	DisplayName      string                     `json:"display_name" gorm:"index" validate:"max=20"`
-	Role             int                        `json:"role" gorm:"type:int;default:1"`   // admin, common
-	Status           int                        `json:"status" gorm:"type:int;default:1"` // enabled, disabled
-	Email            string                     `json:"email" gorm:"index" validate:"max=50"`
-	GitHubId         string                     `json:"github_id" gorm:"column:github_id;index"`
-	DiscordId        string                     `json:"discord_id" gorm:"column:discord_id;index"`
-	OidcId           string                     `json:"oidc_id" gorm:"column:oidc_id;index"`
-	WeChatId         string                     `json:"wechat_id" gorm:"column:wechat_id;index"`
-	TelegramId       string                     `json:"telegram_id" gorm:"column:telegram_id;index"`
-	VerificationCode string                     `json:"verification_code" gorm:"-:all"`                         // this field is only for Email verification, don't save it to database!
-	AccessToken      *string                    `json:"-" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
-	Quota            int                        `json:"quota" gorm:"type:int;default:0"`
-	UsedQuota        int                        `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
-	RequestCount     int                        `json:"request_count" gorm:"type:int;default:0;"`               // request number
-	Group            string                     `json:"group" gorm:"type:varchar(64);default:'default'"`
-	AffCode          string                     `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
-	AffCount         int                        `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
-	AffQuota         int                        `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
-	AffHistoryQuota  int                        `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
-	InviterId        int                        `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
-	DeletedAt        gorm.DeletedAt             `gorm:"index"`
-	LinuxDOId        string                     `json:"linux_do_id" gorm:"column:linux_do_id;index"`
-	Setting          string                     `json:"setting" gorm:"type:text;column:setting"`
-	Remark           string                     `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
-	StripeCustomer   string                     `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
-	CreatedAt        int64                      `json:"created_at" gorm:"autoCreateTime;column:created_at"`
-	LastLoginAt      int64                      `json:"last_login_at" gorm:"default:0;column:last_login_at"`
-	AuthVersion      int64                      `json:"-" gorm:"type:bigint;not null;default:1;column:auth_version"`
-	AdminPermissions map[string]map[string]bool `json:"admin_permissions,omitempty" gorm:"-:all"`
+	Id                 int                        `json:"id"`
+	Username           string                     `json:"username" gorm:"unique;index" validate:"max=20"`
+	Password           string                     `json:"password" gorm:"not null;" validate:"min=8,max=20"`
+	OriginalPassword   string                     `json:"original_password" gorm:"-:all"` // this field is only for Password change verification, don't save it to database!
+	DisplayName        string                     `json:"display_name" gorm:"index" validate:"max=20"`
+	Role               int                        `json:"role" gorm:"type:int;default:1"`   // admin, common
+	Status             int                        `json:"status" gorm:"type:int;default:1"` // enabled, disabled
+	OrganizationId     int                        `json:"organization_id" gorm:"index"`
+	OrganizationRole   OrganizationRole           `json:"organization_role" gorm:"type:varchar(16);index"`
+	OrganizationStatus OrganizationMemberStatus   `json:"organization_status" gorm:"type:varchar(16);index"`
+	Email              string                     `json:"email" gorm:"index" validate:"max=50"`
+	GitHubId           string                     `json:"github_id" gorm:"column:github_id;index"`
+	DiscordId          string                     `json:"discord_id" gorm:"column:discord_id;index"`
+	OidcId             string                     `json:"oidc_id" gorm:"column:oidc_id;index"`
+	WeChatId           string                     `json:"wechat_id" gorm:"column:wechat_id;index"`
+	TelegramId         string                     `json:"telegram_id" gorm:"column:telegram_id;index"`
+	VerificationCode   string                     `json:"verification_code" gorm:"-:all"`                         // this field is only for Email verification, don't save it to database!
+	AccessToken        *string                    `json:"-" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
+	Quota              int                        `json:"quota" gorm:"type:int;default:0"`
+	UsedQuota          int                        `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
+	RequestCount       int                        `json:"request_count" gorm:"type:int;default:0;"`               // request number
+	Group              string                     `json:"group" gorm:"type:varchar(64);default:'default'"`
+	AffCode            string                     `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
+	AffCount           int                        `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
+	AffQuota           int                        `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
+	AffHistoryQuota    int                        `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
+	InviterId          int                        `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
+	DeletedAt          gorm.DeletedAt             `gorm:"index"`
+	LinuxDOId          string                     `json:"linux_do_id" gorm:"column:linux_do_id;index"`
+	Setting            string                     `json:"setting" gorm:"type:text;column:setting"`
+	Remark             string                     `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
+	StripeCustomer     string                     `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
+	CreatedAt          int64                      `json:"created_at" gorm:"autoCreateTime;column:created_at"`
+	LastLoginAt        int64                      `json:"last_login_at" gorm:"default:0;column:last_login_at"`
+	AuthVersion        int64                      `json:"-" gorm:"type:bigint;not null;default:1;column:auth_version"`
+	AdminPermissions   map[string]map[string]bool `json:"admin_permissions,omitempty" gorm:"-:all"`
 }
 
 func (user *User) ToBaseUser() *UserBase {
 	cache := &UserBase{
-		Id:          user.Id,
-		Group:       user.Group,
-		Quota:       user.Quota,
-		Status:      user.Status,
-		Role:        user.Role,
-		Username:    user.Username,
-		Setting:     user.Setting,
-		Email:       user.Email,
-		AuthVersion: user.AuthVersion,
-		CacheSchema: userCacheSchemaVersion,
+		Id:                 user.Id,
+		Group:              user.Group,
+		Quota:              user.Quota,
+		Status:             user.Status,
+		Role:               user.Role,
+		OrganizationId:     user.OrganizationId,
+		OrganizationRole:   user.OrganizationRole,
+		OrganizationStatus: user.OrganizationStatus,
+		Username:           user.Username,
+		Setting:            user.Setting,
+		Email:              user.Email,
+		AuthVersion:        user.AuthVersion,
+		CacheSchema:        userCacheSchemaVersion,
 	}
 	return cache
 }
@@ -550,35 +556,83 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 		return fmt.Errorf("转移额度最小为%s！", logger.LogQuota(common.QuotaFromFloat(common.QuotaPerUnit)))
 	}
 
-	// 开始数据库事务
-	tx := DB.Begin()
-	if tx.Error != nil {
-		return tx.Error
-	}
-	defer tx.Rollback() // 确保在函数退出时事务能回滚
+	creditResult := UserWalletCreditResult{}
+	affQuotaAfter := 0
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var referralSnapshot struct {
+			AffQuota        int
+			AffHistoryQuota int `gorm:"column:aff_history"`
+		}
+		if err := tx.Model(&User{}).
+			Select("aff_quota", "aff_history").
+			Where("id = ?", user.Id).
+			First(&referralSnapshot).Error; err != nil {
+			return err
+		}
+		if referralSnapshot.AffQuota < quota {
+			return errors.New("邀请额度不足！")
+		}
 
-	// 加锁查询用户以确保数据一致性
-	err := lockForUpdate(tx).First(user, user.Id).Error
+		convertedBefore := int64(referralSnapshot.AffHistoryQuota) - int64(referralSnapshot.AffQuota)
+		operationId := fmt.Sprintf("aff-transfer:%d:%d:%d", user.Id, convertedBefore, quota)
+		var err error
+		creditResult, err = CreditUserWalletTx(tx, UserWalletCreditParams{
+			UserId:         user.Id,
+			Amount:         int64(quota),
+			SourceType:     "referral_transfer",
+			SourceId:       operationId,
+			IdempotencyKey: operationId,
+			RequestId:      operationId,
+			Actor: OrganizationAccountingActor{
+				Kind:   OrganizationAccountingActorSystem,
+				Policy: "referral_quota_transfer",
+			},
+		})
+		if err != nil {
+			return err
+		}
+
+		// CreditUserWalletTx acquires organization/account locks before the user
+		// lock. Re-read the referral balance only after that canonical lock order
+		// has been established, then keep both mutations in this transaction.
+		var current User
+		if err := lockForUpdate(tx).
+			Select("id", "organization_id", "quota", "aff_quota", "aff_history").
+			Where("id = ?", user.Id).
+			First(&current).Error; err != nil {
+			return err
+		}
+		if current.OrganizationId != creditResult.OrganizationId {
+			return ErrOrganizationIdentityInvalid
+		}
+		if creditResult.AlreadyApplied {
+			affQuotaAfter = current.AffQuota
+			creditResult.UserQuotaAfter = int64(current.Quota)
+			return nil
+		}
+		if current.AffQuota < quota {
+			return errors.New("邀请额度不足！")
+		}
+
+		update := tx.Model(&User{}).
+			Where("id = ? AND organization_id = ? AND aff_quota = ?", user.Id, current.OrganizationId, current.AffQuota).
+			Update("aff_quota", gorm.Expr("aff_quota - ?", quota))
+		if update.Error != nil {
+			return update.Error
+		}
+		if update.RowsAffected != 1 {
+			return ErrOrganizationAccountingIdempotency
+		}
+		affQuotaAfter = current.AffQuota - quota
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-
-	// 再次检查用户的AffQuota是否足够
-	if user.AffQuota < quota {
-		return errors.New("邀请额度不足！")
-	}
-
-	// 更新用户额度
-	user.AffQuota -= quota
-	user.Quota += quota
-
-	// 保存用户状态
-	if err := tx.Save(user).Error; err != nil {
-		return err
-	}
-
-	// 提交事务
-	return tx.Commit().Error
+	user.AffQuota = affQuotaAfter
+	user.Quota = int(creditResult.UserQuotaAfter)
+	syncUserWalletCreditCache(user.Id, int64(quota), creditResult, "referral quota transfer")
+	return nil
 }
 
 func (user *User) prepareForInsert(tx *gorm.DB) error {
@@ -634,6 +688,13 @@ func ensureEmailAvailableWithTx(tx *gorm.DB, email string, excludeUserID int) er
 
 func (user *User) Insert(inviterId int) error {
 	if err := DB.Transaction(func(tx *gorm.DB) error {
+		provisioned, err := organizationProvisioned(tx)
+		if err != nil {
+			return err
+		}
+		if provisioned {
+			return ErrOrganizationLedgerRequired
+		}
 		return withNormalizedEmailLock(tx, user.Email, func(tx *gorm.DB) error {
 			if err := user.prepareForInsert(tx); err != nil {
 				return err
@@ -698,11 +759,33 @@ func (user *User) FinishInsert(inviterId int) {
 // This is used for OAuth registration where user creation and binding need to be atomic.
 // Post-creation tasks (sidebar config, logs, inviter rewards) are handled after the transaction commits.
 func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
+	provisioned, err := organizationProvisioned(tx)
+	if err != nil {
+		return err
+	}
+	if provisioned {
+		return ErrOrganizationLedgerRequired
+	}
+	return user.insertWithTx(tx, inviterId, true)
+}
+
+// InsertWithTxWithoutInitialQuota creates a user row without granting wallet
+// quota. Registration services use this variant so the initial grant is
+// written by the central organization ledger in the same transaction.
+func (user *User) InsertWithTxWithoutInitialQuota(tx *gorm.DB, inviterId int) error {
+	return user.insertWithTx(tx, inviterId, false)
+}
+
+func (user *User) insertWithTx(tx *gorm.DB, inviterId int, grantInitialQuota bool) error {
 	return withNormalizedEmailLock(tx, user.Email, func(tx *gorm.DB) error {
 		if err := user.prepareForInsert(tx); err != nil {
 			return err
 		}
-		user.Quota = common.QuotaForNewUser
+		if grantInitialQuota {
+			user.Quota = common.QuotaForNewUser
+		} else {
+			user.Quota = 0
+		}
 		user.AffCode = common.GetRandomString(4)
 
 		// 初始化用户设置
@@ -776,7 +859,7 @@ func (user *User) UpdateWithTx(tx *gorm.DB, updatePassword bool) error {
 	}
 	newUser := *user
 	current := User{}
-	if err = tx.First(&current, user.Id).Error; err != nil {
+	if err = lockForUpdate(tx).First(&current, user.Id).Error; err != nil {
 		return err
 	}
 	// Updates(struct) ignores zero values. Match that behavior when deciding
@@ -786,6 +869,11 @@ func (user *User) UpdateWithTx(tx *gorm.DB, updatePassword bool) error {
 		(newUser.Role != 0 && current.Role != newUser.Role) ||
 		(newUser.Status != 0 && current.Status != newUser.Status) ||
 		(newUser.Group != "" && current.Group != newUser.Group)
+	if newUser.Status != 0 {
+		if err := validateUserOrganizationStatusChangeTx(tx, &current, newUser.Status); err != nil {
+			return err
+		}
+	}
 	if authChanged {
 		newUser.AuthVersion, err = IncrementUserAuthVersionWithTx(tx, user.Id)
 		if err != nil {
@@ -801,6 +889,9 @@ func (user *User) UpdateWithTx(tx *gorm.DB, updatePassword bool) error {
 		"aff_quota",
 		"aff_history",
 		"auth_version",
+		"organization_id",
+		"organization_role",
+		"organization_status",
 	).Updates(newUser).Error; err != nil {
 		return err
 	}
@@ -888,8 +979,9 @@ func (user *User) ClearBinding(bindingType string) error {
 		if err := tx.Model(&User{}).Where("id = ?", user.Id).Update(column, "").Error; err != nil {
 			return err
 		}
-		if bindingType == ExternalIdentityProviderTelegram {
-			return ReleaseExternalIdentityWithTx(tx, ExternalIdentityProviderTelegram, user.Id)
+		switch bindingType {
+		case ExternalIdentityProviderTelegram, ExternalIdentityProviderWeChat:
+			return ReleaseExternalIdentityWithTx(tx, bindingType, user.Id)
 		}
 		return nil
 	}); err != nil {
@@ -909,6 +1001,9 @@ func (user *User) Delete() error {
 	}
 	var nextAuthVersion int64
 	if err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := validateUserOrganizationDeletionTx(tx, user.Id); err != nil {
+			return err
+		}
 		var err error
 		nextAuthVersion, err = IncrementUserAuthVersionWithTx(tx, user.Id)
 		if err != nil {
@@ -934,6 +1029,9 @@ func (user *User) HardDelete() error {
 	var tokens []Token
 	var deletedAuthVersion int64
 	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := validateUserOrganizationDeletionTx(tx, user.Id); err != nil {
+			return err
+		}
 		var err error
 		deletedAuthVersion, err = IncrementUserAuthVersionWithTx(tx, user.Id)
 		if err != nil {
@@ -946,6 +1044,11 @@ func (user *User) HardDelete() error {
 		}
 		if err := deleteUserAuthenticationData(tx, user.Id); err != nil {
 			return err
+		}
+		if tx.Migrator().HasTable(&OrganizationMemberFund{}) {
+			if err := tx.Unscoped().Where("user_id = ?", user.Id).Delete(&OrganizationMemberFund{}).Error; err != nil {
+				return err
+			}
 		}
 		return tx.Unscoped().Delete(user).Error
 	})
@@ -1271,6 +1374,9 @@ func IncreaseUserQuota(id int, quota int, db bool) (err error) {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
 	}
+	if err := requireLegacyUserQuotaMutation(id); err != nil {
+		return err
+	}
 	gopool.Go(func() {
 		err := cacheIncrUserQuota(id, int64(quota))
 		if err != nil {
@@ -1295,6 +1401,9 @@ func increaseUserQuota(id int, quota int) (err error) {
 func DecreaseUserQuota(id int, quota int, db bool) (err error) {
 	if quota < 0 {
 		return errors.New("quota 不能为负数！")
+	}
+	if err := requireLegacyUserQuotaMutation(id); err != nil {
+		return err
 	}
 	gopool.Go(func() {
 		err := cacheDecrUserQuota(id, int64(quota))

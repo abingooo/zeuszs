@@ -18,7 +18,6 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
-	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/QuantumNous/new-api/constant"
@@ -203,6 +202,11 @@ func setupLoginAtAuthVersion(user *model.User, expectedAuthVersion int64, c *gin
 	})
 }
 
+type registrationRequest struct {
+	model.User
+	OrganizationInviteCode string `json:"organization_invite_code,omitempty"`
+}
+
 func Register(c *gin.Context) {
 	if !common.RegisterEnabled {
 		common.ApiErrorI18n(c, i18n.MsgUserRegisterDisabled)
@@ -212,12 +216,13 @@ func Register(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserPasswordRegisterDisabled)
 		return
 	}
-	var user model.User
-	err := common.DecodeJson(c.Request.Body, &user)
+	var request registrationRequest
+	err := common.DecodeJson(c.Request.Body, &request)
 	if err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
+	user := request.User
 	user.Username = strings.TrimSpace(user.Username)
 	user.Email = model.NormalizeEmail(user.Email)
 	if user.Username == "" {
@@ -260,19 +265,24 @@ func Register(c *gin.Context) {
 		common.ApiErrorI18n(c, i18n.MsgUserExists)
 		return
 	}
-	affCode := user.AffCode // this code is the inviter's code, not the user's own code
-	inviterId, _ := model.GetUserIdByAffCode(affCode)
 	cleanUser := model.User{
 		Username:    user.Username,
 		Password:    user.Password,
 		DisplayName: user.Username,
-		InviterId:   inviterId,
 		Role:        common.RoleCommonUser, // 明确设置角色为普通用户
+		Status:      common.UserStatusEnabled,
 	}
 	if common.EmailVerificationEnabled {
 		cleanUser.Email = user.Email
 	}
-	if err := cleanUser.Insert(inviterId); err != nil {
+	registration, err := service.RegisterUser(service.UserRegistrationParams{
+		User:                   &cleanUser,
+		AffiliateCode:          user.AffCode,
+		OrganizationInviteCode: request.OrganizationInviteCode,
+		RequestID:              c.GetString(common.RequestIdKey),
+		GenerateDefaultToken:   constant.GenerateDefaultToken,
+	})
+	if err != nil {
 		if errors.Is(err, model.ErrEmailAlreadyTaken) {
 			common.ApiErrorI18n(c, i18n.MsgUserEmailAlreadyTaken)
 			return
@@ -280,40 +290,9 @@ func Register(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-
-	// 获取插入后的用户ID
-	var insertedUser model.User
-	if err := model.DB.Where("username = ?", cleanUser.Username).First(&insertedUser).Error; err != nil {
+	if registration == nil {
 		common.ApiErrorI18n(c, i18n.MsgUserRegisterFailed)
 		return
-	}
-	// 生成默认令牌
-	if constant.GenerateDefaultToken {
-		key, err := common.GenerateKey()
-		if err != nil {
-			common.ApiErrorI18n(c, i18n.MsgUserDefaultTokenFailed)
-			common.SysLog("failed to generate token key: " + err.Error())
-			return
-		}
-		// 生成默认令牌
-		token := model.Token{
-			UserId:             insertedUser.Id, // 使用插入后的用户ID
-			Name:               cleanUser.Username + "的初始令牌",
-			Key:                key,
-			CreatedTime:        common.GetTimestamp(),
-			AccessedTime:       common.GetTimestamp(),
-			ExpiredTime:        -1,     // 永不过期
-			RemainQuota:        500000, // 示例额度
-			UnlimitedQuota:     true,
-			ModelLimitsEnabled: false,
-		}
-		if setting.DefaultUseAutoGroup {
-			token.Group = "auto"
-		}
-		if err := token.Insert(); err != nil {
-			common.ApiErrorI18n(c, i18n.MsgCreateDefaultTokenErr)
-			return
-		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -510,31 +489,34 @@ func buildSelfUserData(user *model.User) map[string]interface{} {
 	permissions := calculateUserPermissions(user.Role)
 	permissions["admin_permissions"] = authz.Capabilities(user.Id, user.Role)
 	return map[string]interface{}{
-		"id":                user.Id,
-		"username":          user.Username,
-		"display_name":      user.DisplayName,
-		"role":              user.Role,
-		"status":            user.Status,
-		"email":             user.Email,
-		"github_id":         user.GitHubId,
-		"discord_id":        user.DiscordId,
-		"oidc_id":           user.OidcId,
-		"wechat_id":         user.WeChatId,
-		"telegram_id":       user.TelegramId,
-		"group":             user.Group,
-		"quota":             user.Quota,
-		"used_quota":        user.UsedQuota,
-		"request_count":     user.RequestCount,
-		"aff_code":          user.AffCode,
-		"aff_count":         user.AffCount,
-		"aff_quota":         user.AffQuota,
-		"aff_history_quota": user.AffHistoryQuota,
-		"inviter_id":        user.InviterId,
-		"linux_do_id":       user.LinuxDOId,
-		"setting":           user.Setting,
-		"stripe_customer":   user.StripeCustomer,
-		"sidebar_modules":   userSetting.SidebarModules, // 正确提取sidebar_modules字段
-		"permissions":       permissions,
+		"id":                  user.Id,
+		"username":            user.Username,
+		"display_name":        user.DisplayName,
+		"role":                user.Role,
+		"status":              user.Status,
+		"organization_id":     user.OrganizationId,
+		"organization_role":   user.OrganizationRole,
+		"organization_status": user.OrganizationStatus,
+		"email":               user.Email,
+		"github_id":           user.GitHubId,
+		"discord_id":          user.DiscordId,
+		"oidc_id":             user.OidcId,
+		"wechat_id":           user.WeChatId,
+		"telegram_id":         user.TelegramId,
+		"group":               user.Group,
+		"quota":               user.Quota,
+		"used_quota":          user.UsedQuota,
+		"request_count":       user.RequestCount,
+		"aff_code":            user.AffCode,
+		"aff_count":           user.AffCount,
+		"aff_quota":           user.AffQuota,
+		"aff_history_quota":   user.AffHistoryQuota,
+		"inviter_id":          user.InviterId,
+		"linux_do_id":         user.LinuxDOId,
+		"setting":             user.Setting,
+		"stripe_customer":     user.StripeCustomer,
+		"sidebar_modules":     userSetting.SidebarModules, // 正确提取sidebar_modules字段
+		"permissions":         permissions,
 	}
 }
 
@@ -1016,7 +998,11 @@ func CreateUser(c *gin.Context) {
 		user.DisplayName = user.Username
 	}
 	myRole := c.GetInt("role")
-	if user.Role >= myRole {
+	requestedRole := user.Role
+	if requestedRole == 0 {
+		requestedRole = common.RoleCommonUser
+	}
+	if !common.IsValidateRole(requestedRole) || requestedRole == common.RoleGuestUser || requestedRole >= myRole {
 		common.ApiErrorI18n(c, i18n.MsgUserCannotCreateHigherLevel)
 		return
 	}
@@ -1025,15 +1011,22 @@ func CreateUser(c *gin.Context) {
 		Username:    user.Username,
 		Password:    user.Password,
 		DisplayName: user.DisplayName,
-		Role:        user.Role, // 保持管理员设置的角色
+		Role:        requestedRole, // platform role only; organization role is always member
+		Status:      common.UserStatusEnabled,
 	}
 	authzTouched := false
+	var registration *service.UserRegistrationResult
 	if err := model.DB.Transaction(func(tx *gorm.DB) error {
-		if err := cleanUser.InsertWithTx(tx, 0); err != nil {
-			return err
-		}
-		touched, err := updateAdminPermissionsForUserInTx(c, tx, cleanUser.Id, cleanUser.Role, user.AdminPermissions)
-		authzTouched = touched
+		var err error
+		registration, err = service.RegisterUserWithTx(tx, service.UserRegistrationParams{
+			User:      &cleanUser,
+			RequestID: c.GetString(common.RequestIdKey),
+			AfterCreateTx: func(tx *gorm.DB, createdUser *model.User) error {
+				touched, permissionErr := updateAdminPermissionsForUserInTx(c, tx, createdUser.Id, createdUser.Role, user.AdminPermissions)
+				authzTouched = touched
+				return permissionErr
+			},
+		})
 		return err
 	}); err != nil {
 		common.ApiError(c, err)
@@ -1045,7 +1038,7 @@ func CreateUser(c *gin.Context) {
 			return
 		}
 	}
-	cleanUser.FinishInsert(0)
+	service.FinalizeRegisteredUser(registration)
 
 	recordManageAuditFor(c, cleanUser.Id, "user.create", map[string]interface{}{
 		"username": cleanUser.Username,
@@ -1161,13 +1154,31 @@ func ManageUser(c *gin.Context) {
 		}
 		user.Role = common.RoleCommonUser
 	case "add_quota":
+		requestId := strings.TrimSpace(c.GetString(common.RequestIdKey))
+		if requestId == "" {
+			requestId = common.NewRequestId()
+		}
+		actor := model.OrganizationAccountingActor{
+			Kind:   model.OrganizationAccountingActorUser,
+			UserId: c.GetInt("id"),
+			Policy: "platform_user_quota_management",
+		}
+		sourceId := strconv.Itoa(user.Id)
 		switch req.Mode {
 		case "add":
 			if req.Value <= 0 {
 				common.ApiErrorI18n(c, i18n.MsgUserQuotaChangeZero)
 				return
 			}
-			if err := model.IncreaseUserQuota(user.Id, req.Value, true); err != nil {
+			if _, err := model.CreditUserWallet(model.UserWalletCreditParams{
+				UserId:         user.Id,
+				Amount:         int64(req.Value),
+				SourceType:     "platform_adjustment",
+				SourceId:       sourceId,
+				IdempotencyKey: "admin-quota:" + requestId + ":add",
+				RequestId:      requestId,
+				Actor:          actor,
+			}); err != nil {
 				common.ApiError(c, err)
 				return
 			}
@@ -1179,7 +1190,15 @@ func ManageUser(c *gin.Context) {
 				common.ApiErrorI18n(c, i18n.MsgUserQuotaChangeZero)
 				return
 			}
-			if err := model.DecreaseUserQuota(user.Id, req.Value, true); err != nil {
+			if _, err := model.DebitUserWallet(model.UserWalletDebitParams{
+				UserId:         user.Id,
+				Amount:         int64(req.Value),
+				SourceType:     "platform_adjustment",
+				SourceId:       sourceId,
+				IdempotencyKey: "admin-quota:" + requestId + ":subtract",
+				RequestId:      requestId,
+				Actor:          actor,
+			}); err != nil {
 				common.ApiError(c, err)
 				return
 			}
@@ -1187,8 +1206,20 @@ func ManageUser(c *gin.Context) {
 				"quota": logger.LogQuota(req.Value),
 			})
 		case "override":
+			if req.Value < 0 {
+				common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+				return
+			}
 			oldQuota := user.Quota
-			if err := model.DB.Model(&model.User{}).Where("id = ?", user.Id).Update("quota", req.Value).Error; err != nil {
+			if err := model.SetUserWalletQuota(model.UserWalletSetParams{
+				UserId:         user.Id,
+				TargetQuota:    int64(req.Value),
+				SourceType:     "platform_adjustment",
+				SourceId:       sourceId,
+				IdempotencyKey: "admin-quota:" + requestId + ":override",
+				RequestId:      requestId,
+				Actor:          actor,
+			}); err != nil {
 				common.ApiError(c, err)
 				return
 			}

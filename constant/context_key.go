@@ -53,6 +53,10 @@ const (
 	ContextKeyUsingGroup  ContextKey = "group"
 	ContextKeyUserName    ContextKey = "username"
 
+	/* organization related keys */
+	ContextKeyOrganizationId   ContextKey = "organization_id"
+	ContextKeyOrganizationRole ContextKey = "organization_role"
+
 	ContextKeyLocalCountTokens ContextKey = "local_count_tokens"
 
 	ContextKeySystemPromptOverride ContextKey = "system_prompt_override"

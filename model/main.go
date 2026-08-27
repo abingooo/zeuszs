@@ -1,10 +1,12 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var commonGroupCol string
@@ -55,26 +58,55 @@ var DB *gorm.DB
 var LOG_DB *gorm.DB
 
 func createRootAccountIfNeed() error {
-	var user User
-	//if user.Status != common.UserStatusEnabled {
-	if err := DB.First(&user).Error; err != nil {
-		common.SysLog("no user exists, create a root user for you: username is root, password is 123456")
-		hashedPassword, err := common.Password2Hash("123456")
-		if err != nil {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var existing User
+		if err := tx.First(&existing).Error; err == nil {
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
 		}
+
+		common.SysLog("no user exists, create a root user for you: username is root, password is 123456")
 		rootUser := User{
 			Username:    "root",
-			Password:    hashedPassword,
+			Password:    "123456",
 			Role:        common.RoleRootUser,
 			Status:      common.UserStatusEnabled,
 			DisplayName: "Root User",
 			AccessToken: nil,
-			Quota:       100000000,
+			Quota:       0,
 		}
-		DB.Create(&rootUser)
-	}
-	return nil
+		if err := rootUser.insertWithTx(tx, 0, false); err != nil {
+			return err
+		}
+		organization, err := EnsureDefaultOrganizationForRootTx(tx, rootUser.Id)
+		if err != nil {
+			return err
+		}
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "organization_id"}, {Name: "user_id"}},
+			DoNothing: true,
+		}).Create(&OrganizationMemberFund{
+			OrganizationId: organization.Id,
+			UserId:         rootUser.Id,
+		}).Error; err != nil {
+			return err
+		}
+		_, err = CreditOrganizationUserWalletTx(tx, OrganizationWalletCreditParams{
+			OrganizationId: organization.Id,
+			UserId:         rootUser.Id,
+			Amount:         100000000,
+			SourceType:     "setup_root_grant",
+			SourceId:       strconv.Itoa(rootUser.Id),
+			IdempotencyKey: fmt.Sprintf("setup:%d:root-grant", rootUser.Id),
+			RequestId:      common.NewRequestId(),
+			Actor: OrganizationAccountingActor{
+				Kind:   OrganizationAccountingActorSystem,
+				Policy: "setup_root_grant",
+			},
+		})
+		return err
+	})
 }
 
 func CheckSetup() {
@@ -257,9 +289,27 @@ func migrateDB() error {
 	if err := migrateTokenModelLimitsToText(); err != nil {
 		return err
 	}
+	if err := migrateTaskBillingRevision(); err != nil {
+		return err
+	}
+	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		if err := prepareSQLiteLogBillingEventColumns(DB); err != nil {
+			return err
+		}
+	}
 
 	err := DB.AutoMigrate(
 		&Channel{},
+		&Organization{},
+		&OrganizationInvite{},
+		&OrganizationInviteUse{},
+		&OrganizationFundAccount{},
+		&OrganizationMemberFund{},
+		&OrganizationQuotaLedger{},
+		&OrganizationQuotaOperation{},
+		&OrganizationWalletReservation{},
+		&OrganizationAuditEvent{},
+		&BillingLogOutbox{},
 		&Token{},
 		&User{},
 		&UserSession{},
@@ -296,6 +346,12 @@ func migrateDB() error {
 	if err != nil {
 		return err
 	}
+	if err := migrateTaskBillingRevision(); err != nil {
+		return err
+	}
+	if err := EnsureDefaultOrganizationAndBackfill(); err != nil {
+		return err
+	}
 	if err := InitializeUserAuthVersions(); err != nil {
 		return err
 	}
@@ -315,6 +371,14 @@ func migrateDB() error {
 }
 
 func migrateDBFast() error {
+	if err := migrateTaskBillingRevision(); err != nil {
+		return err
+	}
+	if common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		if err := prepareSQLiteLogBillingEventColumns(DB); err != nil {
+			return err
+		}
+	}
 
 	var wg sync.WaitGroup
 
@@ -323,6 +387,16 @@ func migrateDBFast() error {
 		name  string
 	}{
 		{&Channel{}, "Channel"},
+		{&Organization{}, "Organization"},
+		{&OrganizationInvite{}, "OrganizationInvite"},
+		{&OrganizationInviteUse{}, "OrganizationInviteUse"},
+		{&OrganizationFundAccount{}, "OrganizationFundAccount"},
+		{&OrganizationMemberFund{}, "OrganizationMemberFund"},
+		{&OrganizationQuotaLedger{}, "OrganizationQuotaLedger"},
+		{&OrganizationQuotaOperation{}, "OrganizationQuotaOperation"},
+		{&OrganizationWalletReservation{}, "OrganizationWalletReservation"},
+		{&OrganizationAuditEvent{}, "OrganizationAuditEvent"},
+		{&BillingLogOutbox{}, "BillingLogOutbox"},
 		{&Token{}, "Token"},
 		{&User{}, "User"},
 		{&UserSession{}, "UserSession"},
@@ -377,6 +451,12 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	if err := migrateTaskBillingRevision(); err != nil {
+		return err
+	}
+	if err := EnsureDefaultOrganizationAndBackfill(); err != nil {
+		return err
+	}
 	if err := InitializeUserAuthVersions(); err != nil {
 		return err
 	}
@@ -396,11 +476,53 @@ func migrateDBFast() error {
 	return nil
 }
 
+// migrateTaskBillingRevision repairs the nullable column shipped during the
+// organization transition before AutoMigrate enforces the non-null schema.
+func migrateTaskBillingRevision() error {
+	if DB == nil || !DB.Migrator().HasTable(&Task{}) || !DB.Migrator().HasColumn(&Task{}, "billing_revision") {
+		return nil
+	}
+	return DB.Model(&Task{}).Where("billing_revision IS NULL").UpdateColumn("billing_revision", 0).Error
+}
+
 func migrateLOGDB() error {
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
 		return migrateClickHouseLogDB()
 	}
-	return LOG_DB.AutoMigrate(&Log{})
+	if common.UsingLogDatabase(common.DatabaseTypeSQLite) {
+		if err := prepareSQLiteLogBillingEventColumns(LOG_DB); err != nil {
+			return err
+		}
+	}
+	if err := LOG_DB.AutoMigrate(&Log{}); err != nil {
+		return err
+	}
+	return backfillLegacyLogOrganization()
+}
+
+// SQLite cannot add a UNIQUE column to an existing table. Add the nullable
+// billing-event columns first so AutoMigrate can create the unique index as a
+// separate schema operation without rebuilding the legacy logs table.
+func prepareSQLiteLogBillingEventColumns(db *gorm.DB) error {
+	if db == nil || !db.Migrator().HasTable(&Log{}) {
+		return nil
+	}
+	columns := []struct {
+		name string
+		ddl  string
+	}{
+		{name: "billing_event_id", ddl: "`billing_event_id` varchar(128)"},
+		{name: "billing_event_fingerprint", ddl: "`billing_event_fingerprint` char(64)"},
+	}
+	for _, column := range columns {
+		if db.Migrator().HasColumn(&Log{}, column.name) {
+			continue
+		}
+		if err := db.Exec("ALTER TABLE `logs` ADD COLUMN " + column.ddl).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func migrateClickHouseLogDB() error {
@@ -408,7 +530,20 @@ func migrateClickHouseLogDB() error {
 	if err := LOG_DB.Exec(clickHouseLogCreateTableSQL(ttlDays)).Error; err != nil {
 		return err
 	}
-	return syncClickHouseLogTTL(ttlDays)
+	for _, statement := range clickHouseLogOrganizationColumnsSQL() {
+		if err := LOG_DB.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+	for _, statement := range clickHouseLogBillingEventColumnsSQL() {
+		if err := LOG_DB.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+	if err := syncClickHouseLogTTL(ttlDays); err != nil {
+		return err
+	}
+	return backfillLegacyLogOrganization()
 }
 
 func clickHouseLogTTLDays() int {
@@ -439,6 +574,8 @@ func clickHouseLogCreateTableSQL(ttlDays int) string {
 CREATE TABLE IF NOT EXISTS logs (
 	id Int64 DEFAULT 0,
 	user_id Int32 DEFAULT 0,
+	organization_id Int32 DEFAULT 0,
+	project_id Nullable(Int32) DEFAULT NULL,
 	created_at Int64 DEFAULT 0,
 	type Int32 DEFAULT 0,
 	content String DEFAULT '',
@@ -456,11 +593,27 @@ CREATE TABLE IF NOT EXISTS logs (
 	ip String DEFAULT '',
 	request_id String DEFAULT '',
 	upstream_request_id String DEFAULT '',
+	billing_event_id Nullable(String) DEFAULT NULL,
+	billing_event_fingerprint Nullable(String) DEFAULT NULL,
 	other String DEFAULT ''
 )
 ENGINE = MergeTree()
 PARTITION BY toYYYYMM(toDateTime(created_at))
 ORDER BY (created_at, request_id)%s`, clickHouseLogTTLClause(ttlDays))
+}
+
+func clickHouseLogOrganizationColumnsSQL() []string {
+	return []string{
+		"ALTER TABLE logs ADD COLUMN IF NOT EXISTS organization_id Int32 DEFAULT 0 AFTER user_id",
+		"ALTER TABLE logs ADD COLUMN IF NOT EXISTS project_id Nullable(Int32) DEFAULT NULL AFTER organization_id",
+	}
+}
+
+func clickHouseLogBillingEventColumnsSQL() []string {
+	return []string{
+		"ALTER TABLE logs ADD COLUMN IF NOT EXISTS billing_event_id Nullable(String) DEFAULT NULL AFTER upstream_request_id",
+		"ALTER TABLE logs ADD COLUMN IF NOT EXISTS billing_event_fingerprint Nullable(String) DEFAULT NULL AFTER billing_event_id",
+	}
 }
 
 func syncClickHouseLogTTL(ttlDays int) error {

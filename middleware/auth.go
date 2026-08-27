@@ -43,7 +43,8 @@ func validUserInfo(username string, role int) bool {
 }
 
 func authHelper(c *gin.Context, minRole int) {
-	user, identity, useAccessToken, err := authenticateDashboardRequest(c)
+	allowPlatformRecovery := minRole == common.RoleAdminUser || minRole == common.RoleRootUser
+	user, identity, useAccessToken, err := authenticateDashboardRequest(c, allowPlatformRecovery)
 	if err != nil {
 		writeDashboardAuthError(c, err)
 		return
@@ -77,7 +78,7 @@ func authHelper(c *gin.Context, minRole int) {
 
 func TryUserAuth() func(c *gin.Context) {
 	return func(c *gin.Context) {
-		user, identity, credentialKind, err := classifyDashboardCredential(c)
+		user, identity, credentialKind, err := classifyDashboardCredential(c, false)
 		if err != nil {
 			writeDashboardAuthError(c, err)
 			return
@@ -136,8 +137,8 @@ func GetSessionAuthIdentity(c *gin.Context) (service.AuthIdentity, bool) {
 	return identity, true
 }
 
-func authenticateDashboardRequest(c *gin.Context) (*model.UserBase, service.AuthIdentity, bool, error) {
-	user, identity, credentialKind, err := classifyDashboardCredential(c)
+func authenticateDashboardRequest(c *gin.Context, allowPlatformRecovery bool) (*model.UserBase, service.AuthIdentity, bool, error) {
+	user, identity, credentialKind, err := classifyDashboardCredential(c, allowPlatformRecovery)
 	if err != nil {
 		return nil, service.AuthIdentity{}, credentialKind == dashboardCredentialPAT, err
 	}
@@ -147,7 +148,7 @@ func authenticateDashboardRequest(c *gin.Context) (*model.UserBase, service.Auth
 	return user, identity, credentialKind == dashboardCredentialPAT, nil
 }
 
-func classifyDashboardCredential(c *gin.Context) (*model.UserBase, service.AuthIdentity, dashboardCredentialKind, error) {
+func classifyDashboardCredential(c *gin.Context, allowPlatformRecovery bool) (*model.UserBase, service.AuthIdentity, dashboardCredentialKind, error) {
 	raw, ok := authorizationToken(c.GetHeader("Authorization"))
 	if !ok {
 		return nil, service.AuthIdentity{}, dashboardCredentialUnmatched, nil
@@ -157,7 +158,12 @@ func classifyDashboardCredential(c *gin.Context) (*model.UserBase, service.AuthI
 		if err != nil {
 			return nil, service.AuthIdentity{}, dashboardCredentialInternal, err
 		}
-		_, user, err := service.ValidateLoginSession(identity)
+		var user *model.UserBase
+		if allowPlatformRecovery {
+			_, user, err = service.ValidatePlatformLoginSession(identity)
+		} else {
+			_, user, err = service.ValidateLoginSession(identity)
+		}
 		if err != nil {
 			return nil, service.AuthIdentity{}, dashboardCredentialInternal, err
 		}
@@ -170,7 +176,7 @@ func classifyDashboardCredential(c *gin.Context) (*model.UserBase, service.AuthI
 	if patUser == nil || patUser.Id <= 0 {
 		return nil, service.AuthIdentity{}, dashboardCredentialUnmatched, nil
 	}
-	user, err := model.GetUserCache(patUser.Id)
+	user, err := service.ValidateDashboardPATUser(patUser.Id, patUser.AuthVersion, allowPlatformRecovery)
 	if err != nil {
 		return nil, service.AuthIdentity{}, dashboardCredentialPAT, err
 	}
@@ -212,6 +218,10 @@ func writeDashboardAuthError(c *gin.Context, err error) {
 		return
 	}
 	if errors.Is(err, service.ErrLoginSessionRevoked) || errors.Is(err, gorm.ErrRecordNotFound) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"success": false, "code": "AUTH_SESSION_REVOKED", "message": common.TranslateMessage(c, i18n.MsgAuthNotLoggedIn)})
+		return
+	}
+	if errors.Is(err, service.ErrOrganizationIdentityInvalid) || errors.Is(err, service.ErrOrganizationInactive) || errors.Is(err, service.ErrOrganizationMembershipInactive) {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"success": false, "code": "AUTH_SESSION_REVOKED", "message": common.TranslateMessage(c, i18n.MsgAuthNotLoggedIn)})
 		return
 	}
@@ -341,6 +351,10 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 			c.Abort()
 			return
 		}
+		if err := validateTokenOrganization(c, userCache, token); err != nil {
+			writeTokenOrganizationAuthError(c, err, false)
+			return
+		}
 
 		c.Set("id", token.UserId)
 		c.Set("token_id", token.Id)
@@ -451,6 +465,10 @@ func TokenAuth() func(c *gin.Context) {
 		userEnabled := userCache.Status == common.UserStatusEnabled
 		if !userEnabled {
 			abortWithOpenAiMessage(c, http.StatusForbidden, common.TranslateMessage(c, i18n.MsgAuthUserBanned))
+			return
+		}
+		if err := validateTokenOrganization(c, userCache, token); err != nil {
+			writeTokenOrganizationAuthError(c, err, true)
 			return
 		}
 

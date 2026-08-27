@@ -29,12 +29,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Skeleton } from '@/components/ui/skeleton'
 import { formatLocalCurrencyAmount } from '@/lib/currency'
 
 import { DEFAULT_DISCOUNT_RATE } from '../../constants'
 import { formatCurrency, getPaymentIcon } from '../../lib'
-import type { PaymentMethod } from '../../types'
+import type { PaymentMethod, TopUpTarget } from '../../types'
 
 interface PaymentConfirmDialogProps {
   open: boolean
@@ -43,10 +42,11 @@ interface PaymentConfirmDialogProps {
   topupAmount: number
   paymentAmount: number
   paymentMethod: PaymentMethod | undefined
-  calculating: boolean
   processing: boolean
   discountRate?: number
   usdExchangeRate?: number
+  topUpTarget: TopUpTarget
+  organizationName?: string
 }
 
 export function PaymentConfirmDialog({
@@ -56,10 +56,11 @@ export function PaymentConfirmDialog({
   topupAmount,
   paymentAmount,
   paymentMethod,
-  calculating,
   processing,
   discountRate = DEFAULT_DISCOUNT_RATE,
   usdExchangeRate = 1,
+  topUpTarget,
+  organizationName,
 }: PaymentConfirmDialogProps) {
   const { t } = useTranslation()
   const hasDiscount = discountRate > 0 && discountRate < 1 && paymentAmount > 0
@@ -79,6 +80,17 @@ export function PaymentConfirmDialog({
         </AlertDialogHeader>
 
         <div className='space-y-3 py-3 sm:space-y-4 sm:py-4'>
+          <div className='flex items-center justify-between gap-4'>
+            <span className='text-muted-foreground text-sm'>
+              {t('Recharge destination')}
+            </span>
+            <span className='min-w-0 truncate text-sm font-medium'>
+              {topUpTarget === 'organization'
+                ? `${t('Organization wallet')} · ${organizationName ?? ''}`
+                : t('Personal wallet')}
+            </span>
+          </div>
+
           <div className='flex items-center justify-between'>
             <span className='text-muted-foreground text-sm'>
               {t('Topup Amount')}
@@ -96,23 +108,19 @@ export function PaymentConfirmDialog({
             <span className='text-muted-foreground text-sm'>
               {t('You Pay')}
             </span>
-            {calculating ? (
-              <Skeleton className='h-6 w-24' />
-            ) : (
-              <div className='flex items-baseline gap-2'>
-                <span className='text-2xl font-semibold'>
-                  {formatCurrency(paymentAmount)}
+            <div className='flex items-baseline gap-2'>
+              <span className='text-2xl font-semibold'>
+                {formatCurrency(paymentAmount)}
+              </span>
+              {hasDiscount && (
+                <span className='text-muted-foreground text-sm line-through'>
+                  {formatCurrency(originalAmount)}
                 </span>
-                {hasDiscount && (
-                  <span className='text-muted-foreground text-sm line-through'>
-                    {formatCurrency(originalAmount)}
-                  </span>
-                )}
-              </div>
-            )}
+              )}
+            </div>
           </div>
 
-          {hasDiscount && !calculating && (
+          {hasDiscount && (
             <div className='bg-muted/50 rounded-lg p-3'>
               <div className='flex items-center justify-between text-sm'>
                 <span className='text-muted-foreground'>{t('You save')}</span>

@@ -65,9 +65,10 @@ var (
 // policy authorized an accounting mutation. System actors are reserved for
 // trusted registration, payment-settlement, refund, and migration services.
 type OrganizationAccountingActor struct {
-	Kind   string
-	UserId int
-	Policy string
+	Kind            string
+	UserId          int
+	InitiatorUserId int
+	Policy          string
 }
 
 // OrganizationQuotaOperation claims an idempotency key before any balances
@@ -86,6 +87,7 @@ type OrganizationQuotaOperation struct {
 	SourceId              string `json:"source_id" gorm:"type:varchar(128);not null"`
 	ActorKind             string `json:"actor_kind" gorm:"type:varchar(16);not null"`
 	ActorUserId           int    `json:"actor_user_id" gorm:"not null;index"`
+	InitiatorUserId       *int   `json:"initiator_user_id,omitempty" gorm:"index"`
 	ActorPolicy           string `json:"actor_policy" gorm:"type:varchar(64);not null"`
 	RequestId             string `json:"request_id" gorm:"type:varchar(64);not null;index"`
 	State                 string `json:"state" gorm:"type:varchar(16);not null;index"`
@@ -221,7 +223,7 @@ type OrganizationWalletReservationResult struct {
 }
 
 func validateOrganizationAccountingIdentity(organizationId int, userId int, amount int64, sourceType string, sourceId string, idempotencyKey string, requestId string, actor OrganizationAccountingActor) error {
-	if organizationId <= 0 || userId < 0 || amount < 0 || strings.TrimSpace(sourceType) == "" || strings.TrimSpace(sourceId) == "" || strings.TrimSpace(idempotencyKey) == "" || strings.TrimSpace(requestId) == "" || strings.TrimSpace(actor.Policy) == "" {
+	if organizationId <= 0 || userId < 0 || amount < 0 || actor.InitiatorUserId < 0 || strings.TrimSpace(sourceType) == "" || strings.TrimSpace(sourceId) == "" || strings.TrimSpace(idempotencyKey) == "" || strings.TrimSpace(requestId) == "" || strings.TrimSpace(actor.Policy) == "" {
 		return ErrOrganizationAccountingInvalid
 	}
 	if len(idempotencyKey) > 128 || len(requestId) > 64 || len(sourceType) > 32 || len(sourceId) > 128 || len(actor.Policy) > 64 {
@@ -229,7 +231,7 @@ func validateOrganizationAccountingIdentity(organizationId int, userId int, amou
 	}
 	switch actor.Kind {
 	case OrganizationAccountingActorUser:
-		if actor.UserId <= 0 {
+		if actor.UserId <= 0 || (actor.InitiatorUserId != 0 && actor.InitiatorUserId != actor.UserId) {
 			return ErrOrganizationAccountingInvalid
 		}
 	case OrganizationAccountingActorSystem:
@@ -259,22 +261,29 @@ func newOrganizationQuotaOperation(operation string, organizationId int, userId 
 		strconv.Itoa(actor.UserId),
 		actor.Policy,
 	}
+	var initiatorUserId *int
+	if actor.InitiatorUserId > 0 {
+		initiator := actor.InitiatorUserId
+		initiatorUserId = &initiator
+		parts = append(parts, "initiator_user_id", strconv.Itoa(initiator))
+	}
 	parts = append(parts, extra...)
 	return &OrganizationQuotaOperation{
-		IdempotencyKey: idempotencyKey,
-		ClaimToken:     common.NewRequestId(),
-		Fingerprint:    organizationAccountingFingerprint(parts...),
-		Operation:      operation,
-		OrganizationId: organizationId,
-		UserId:         userId,
-		Amount:         amount,
-		SourceType:     sourceType,
-		SourceId:       sourceId,
-		ActorKind:      actor.Kind,
-		ActorUserId:    actor.UserId,
-		ActorPolicy:    actor.Policy,
-		RequestId:      requestId,
-		State:          OrganizationQuotaOperationPending,
+		IdempotencyKey:  idempotencyKey,
+		ClaimToken:      common.NewRequestId(),
+		Fingerprint:     organizationAccountingFingerprint(parts...),
+		Operation:       operation,
+		OrganizationId:  organizationId,
+		UserId:          userId,
+		Amount:          amount,
+		SourceType:      sourceType,
+		SourceId:        sourceId,
+		ActorKind:       actor.Kind,
+		ActorUserId:     actor.UserId,
+		InitiatorUserId: initiatorUserId,
+		ActorPolicy:     actor.Policy,
+		RequestId:       requestId,
+		State:           OrganizationQuotaOperationPending,
 	}
 }
 
@@ -395,6 +404,63 @@ func validateOrganizationMemberFund(user *User, fund *OrganizationMemberFund) er
 	return nil
 }
 
+// adjustOrganizationMemberConsumptionTx applies an organization-wide member
+// limit without changing the user's single wallet. Subscription billing uses
+// this in the same transaction as its own quota mutation.
+func adjustOrganizationMemberConsumptionTx(tx *gorm.DB, organizationId int, userId int, delta int64) error {
+	if tx == nil || organizationId <= 0 || userId <= 0 || delta == 0 ||
+		delta > int64(common.MaxQuota-1) || delta < -int64(common.MaxQuota-1) {
+		return ErrOrganizationAccountingInvalid
+	}
+
+	var organization Organization
+	if err := lockForUpdate(tx).Select("id", "status").Where("id = ?", organizationId).First(&organization).Error; err != nil {
+		return err
+	}
+	if delta > 0 && organization.Status != OrganizationStatusActive {
+		return ErrOrganizationNotActive
+	}
+	user, err := loadOrganizationAccountingTarget(tx, organizationId, userId, delta > 0, false)
+	if err != nil {
+		return err
+	}
+	memberFund, err := loadOrganizationMemberFund(tx, organizationId, userId)
+	if err != nil {
+		return err
+	}
+	if err := validateOrganizationMemberFund(user, memberFund); err != nil {
+		return err
+	}
+
+	if delta > 0 && memberFund.ConsumedQuota > math.MaxInt64-delta {
+		return ErrOrganizationConsumptionLimit
+	}
+	consumedAfter := memberFund.ConsumedQuota + delta
+	if consumedAfter < 0 {
+		return ErrOrganizationAccountingInvalid
+	}
+	if memberFund.ConsumptionLimit != nil && consumedAfter > *memberFund.ConsumptionLimit {
+		return ErrOrganizationConsumptionLimit
+	}
+
+	query := tx.Model(&OrganizationMemberFund{}).
+		Where("id = ? AND consumed_quota = ?", memberFund.Id, memberFund.ConsumedQuota)
+	if delta > 0 {
+		query = query.Where("consumption_limit IS NULL OR consumption_limit >= ?", consumedAfter)
+	}
+	update := query.Update("consumed_quota", consumedAfter)
+	if update.Error != nil {
+		return update.Error
+	}
+	if update.RowsAffected != 1 {
+		if delta > 0 {
+			return ErrOrganizationConsumptionLimit
+		}
+		return ErrOrganizationAccountingIdempotency
+	}
+	return nil
+}
+
 func authorizeOrganizationAccountingActor(tx *gorm.DB, organizationId int, actor OrganizationAccountingActor, organizationRoles ...OrganizationRole) error {
 	if actor.Kind == OrganizationAccountingActorSystem {
 		return nil
@@ -466,6 +532,7 @@ func commitOrganizationAccounting(tx *gorm.DB, operation *OrganizationQuotaOpera
 		"source_id":               ledger.SourceId,
 		"actor_kind":              operation.ActorKind,
 		"actor_policy":            operation.ActorPolicy,
+		"initiator_user_id":       operation.InitiatorUserId,
 		"idempotency_key":         operation.IdempotencyKey,
 		"user_quota_delta":        ledger.UserQuotaDelta,
 		"pool_quota_delta":        ledger.PoolQuotaDelta,
@@ -478,13 +545,14 @@ func commitOrganizationAccounting(tx *gorm.DB, operation *OrganizationQuotaOpera
 		return OrganizationAccountingResult{}, err
 	}
 	audit := OrganizationAuditEvent{
-		OrganizationId: ledger.OrganizationId,
-		ActorUserId:    ledger.ActorUserId,
-		Action:         auditAction,
-		TargetType:     targetType,
-		TargetId:       targetId,
-		RequestId:      ledger.RequestId,
-		Metadata:       string(metadata),
+		OrganizationId:  ledger.OrganizationId,
+		ActorUserId:     ledger.ActorUserId,
+		InitiatorUserId: ledger.InitiatorUserId,
+		Action:          auditAction,
+		TargetType:      targetType,
+		TargetId:        targetId,
+		RequestId:       ledger.RequestId,
+		Metadata:        string(metadata),
 	}
 	if err := tx.Create(&audit).Error; err != nil {
 		return OrganizationAccountingResult{}, err
@@ -538,6 +606,7 @@ func organizationQuotaLedger(operation *OrganizationQuotaOperation, userDelta in
 		SourceType:            operation.SourceType,
 		SourceId:              operation.SourceId,
 		ActorUserId:           operation.ActorUserId,
+		InitiatorUserId:       operation.InitiatorUserId,
 		RequestId:             operation.RequestId,
 		UserQuotaDelta:        userDelta,
 		PoolQuotaDelta:        poolDelta,

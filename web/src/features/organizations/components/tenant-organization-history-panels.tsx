@@ -181,6 +181,7 @@ export function TenantOrganizationAuditPanel() {
                   <TableHead>{t('Time')}</TableHead>
                   <TableHead>{t('Action')}</TableHead>
                   <TableHead>{t('Actor user ID')}</TableHead>
+                  <TableHead>{t('Initiator user ID')}</TableHead>
                   <TableHead>{t('Target')}</TableHead>
                   <TableHead>{t('Request ID')}</TableHead>
                 </TableRow>
@@ -195,6 +196,7 @@ export function TenantOrganizationAuditPanel() {
                       <code>{entry.action}</code>
                     </TableCell>
                     <TableCell>{entry.actor_user_id}</TableCell>
+                    <TableCell>{entry.initiator_user_id ?? '-'}</TableCell>
                     <TableCell>
                       <span className='inline-block max-w-48 truncate align-middle'>
                         {entry.target_type}:{entry.target_id}

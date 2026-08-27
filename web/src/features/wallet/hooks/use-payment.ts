@@ -16,8 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import axios from 'axios'
 import i18next from 'i18next'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { toast } from 'sonner'
 
 import {
@@ -35,7 +36,7 @@ import {
   isWaffoPancakePayment,
   submitPaymentForm,
 } from '../lib'
-import type { AmountRequest, AmountResponse } from '../types'
+import type { AmountRequest, AmountResponse, TopUpTarget } from '../types'
 
 // ============================================================================
 // Payment Hook
@@ -57,11 +58,17 @@ const defaultPaymentAmountCalculators: PaymentAmountCalculators = {
   waffoPancake: calculateWaffoPancakeAmount,
 }
 
+export type PaymentCalculationResult =
+  | { status: 'success'; amount: number }
+  | { status: 'failed'; permissionDenied: boolean }
+  | { status: 'stale' }
+
 export async function requestPaymentAmount(
   topupAmount: number,
   paymentType: string,
+  topUpTarget: TopUpTarget,
   calculators: PaymentAmountCalculators = defaultPaymentAmountCalculators
-): Promise<number> {
+): Promise<PaymentCalculationResult> {
   let calculator = calculators.regular
   if (isStripePayment(paymentType)) {
     calculator = calculators.stripe
@@ -71,35 +78,62 @@ export async function requestPaymentAmount(
     calculator = calculators.waffoPancake
   }
 
-  const response = await calculator({ amount: topupAmount })
-  if (!isApiSuccess(response) || !response.data) {
-    return 0
-  }
+  try {
+    const response = await calculator({
+      amount: topupAmount,
+      topup_target: topUpTarget,
+    })
+    if (!isApiSuccess(response) || !response.data) {
+      return { status: 'failed', permissionDenied: false }
+    }
 
-  return Number.parseFloat(response.data)
+    const amount = Number.parseFloat(response.data)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return { status: 'failed', permissionDenied: false }
+    }
+
+    return { status: 'success', amount }
+  } catch (error) {
+    return {
+      status: 'failed',
+      permissionDenied:
+        axios.isAxiosError(error) && error.response?.status === 403,
+    }
+  }
 }
 
 export function usePayment() {
   const [amount, setAmount] = useState<number>(0)
   const [calculating, setCalculating] = useState(false)
   const [processing, setProcessing] = useState(false)
+  const calculationRequestIdRef = useRef(0)
 
   // Calculate payment amount
   const calculatePaymentAmount = useCallback(
-    async (topupAmount: number, paymentType: string) => {
+    async (
+      topupAmount: number,
+      paymentType: string,
+      topUpTarget: TopUpTarget
+    ) => {
+      const requestId = ++calculationRequestIdRef.current
       try {
         setCalculating(true)
-        const calculatedAmount = await requestPaymentAmount(
+        const result = await requestPaymentAmount(
           topupAmount,
-          paymentType
+          paymentType,
+          topUpTarget
         )
-        setAmount(calculatedAmount)
-        return calculatedAmount
-      } catch {
-        setAmount(0)
-        return 0
+
+        if (requestId !== calculationRequestIdRef.current) {
+          return { status: 'stale' } as const
+        }
+
+        setAmount(result.status === 'success' ? result.amount : 0)
+        return result
       } finally {
-        setCalculating(false)
+        if (requestId === calculationRequestIdRef.current) {
+          setCalculating(false)
+        }
       }
     },
     []
@@ -107,7 +141,11 @@ export function usePayment() {
 
   // Process payment
   const processPayment = useCallback(
-    async (topupAmount: number, paymentType: string) => {
+    async (
+      topupAmount: number,
+      paymentType: string,
+      topUpTarget: TopUpTarget
+    ) => {
       try {
         setProcessing(true)
 
@@ -118,10 +156,12 @@ export function usePayment() {
           ? await requestStripePayment({
               amount,
               payment_method: 'stripe',
+              topup_target: topUpTarget,
             })
           : await requestPayment({
               amount,
               payment_method: paymentType,
+              topup_target: topUpTarget,
             })
 
         if (!isApiSuccess(response)) {

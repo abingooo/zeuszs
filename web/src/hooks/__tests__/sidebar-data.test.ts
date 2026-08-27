@@ -17,9 +17,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { renderHook } from '@testing-library/react'
-import { describe, expect, test } from 'vitest'
+import { afterEach, describe, expect, test } from 'vitest'
+
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { useSidebarData } from '../use-sidebar-data'
+
+afterEach(() => {
+  useAuthStore.getState().auth.reset('idle')
+})
 
 describe('sidebar data', () => {
   test('does not expose playground or chat navigation', () => {
@@ -56,4 +63,27 @@ describe('sidebar data', () => {
       ])
     )
   })
+
+  test.each(['owner', 'admin'] as const)(
+    'labels the tenant workspace as Manage organization for an %s',
+    (organizationRole) => {
+      useAuthStore.getState().auth.setUser({
+        id: 1,
+        username: 'tenant-manager',
+        role: ROLE.USER,
+        organization_id: 17,
+        organization_role: organizationRole,
+        organization_status: 'active',
+      })
+
+      const { result } = renderHook(() => useSidebarData())
+      const item = result.current.navGroups
+        .flatMap((group) => group.items)
+        .find(
+          (candidate) => 'url' in candidate && candidate.url === '/organization'
+        )
+
+      expect(item?.title).toBe('Manage organization')
+    }
+  )
 })

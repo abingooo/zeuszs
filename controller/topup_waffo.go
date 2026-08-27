@@ -106,6 +106,7 @@ func getWaffoPayMoney(amount float64, group string) float64 {
 
 type WaffoPayRequest struct {
 	Amount         int64  `json:"amount"`
+	TopUpTarget    string `json:"topup_target,omitempty"`
 	PayMethodIndex *int   `json:"pay_method_index"` // 服务端支付方式列表的索引，nil 表示由 Waffo 自动选择
 	PayMethodType  string `json:"pay_method_type"`  // Deprecated: 兼容旧前端，优先使用 pay_method_index
 	PayMethodName  string `json:"pay_method_name"`  // Deprecated: 兼容旧前端，优先使用 pay_method_index
@@ -124,7 +125,12 @@ func RequestWaffoAmount(c *gin.Context) {
 		return
 	}
 	id := c.GetInt("id")
-	if rejectInvalidTopUpQuota(c, id, req.Amount) {
+	target, err := resolveTopUpTarget(c, req.TopUpTarget)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	if rejectInvalidTopUpQuota(c, id, target, req.Amount) {
 		return
 	}
 
@@ -161,7 +167,12 @@ func RequestWaffoPay(c *gin.Context) {
 		return
 	}
 	id := c.GetInt("id")
-	if rejectInvalidTopUpQuota(c, id, req.Amount) {
+	target, err := resolveTopUpTarget(c, req.TopUpTarget)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	if rejectInvalidTopUpQuota(c, id, target, req.Amount) {
 		return
 	}
 
@@ -231,6 +242,7 @@ func RequestWaffoPay(c *gin.Context) {
 		TradeNo:         merchantOrderId,
 		PaymentMethod:   model.PaymentMethodWaffo,
 		PaymentProvider: model.PaymentProviderWaffo,
+		TopUpTarget:     target,
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}

@@ -219,6 +219,88 @@ func TestUpdateOrganizationStatusForPlatformInvalidatesMembersAndAudits(t *testi
 	assert.Equal(t, actor.Id, audit.ActorUserId)
 }
 
+func TestUpdateOrganizationStatusForPlatformEnforcesStateMachine(t *testing.T) {
+	db := setupOrganizationManagementTestDB(t)
+	actor := createOrganizationManagementUser(t, db, "status-machine-admin", common.RoleAdminUser, 0, "")
+	testCases := []struct {
+		name    string
+		from    model.OrganizationStatus
+		to      model.OrganizationStatus
+		allowed bool
+	}{
+		{name: "active to disabled", from: model.OrganizationStatusActive, to: model.OrganizationStatusDisabled, allowed: true},
+		{name: "active to dissolving", from: model.OrganizationStatusActive, to: model.OrganizationStatusDissolving, allowed: true},
+		{name: "active to dissolved", from: model.OrganizationStatusActive, to: model.OrganizationStatusDissolved},
+		{name: "disabled to active", from: model.OrganizationStatusDisabled, to: model.OrganizationStatusActive, allowed: true},
+		{name: "disabled to dissolving", from: model.OrganizationStatusDisabled, to: model.OrganizationStatusDissolving, allowed: true},
+		{name: "disabled to dissolved", from: model.OrganizationStatusDisabled, to: model.OrganizationStatusDissolved},
+		{name: "dissolving to active", from: model.OrganizationStatusDissolving, to: model.OrganizationStatusActive, allowed: true},
+		{name: "dissolving to disabled", from: model.OrganizationStatusDissolving, to: model.OrganizationStatusDisabled},
+		{name: "dissolving to dissolved", from: model.OrganizationStatusDissolving, to: model.OrganizationStatusDissolved, allowed: true},
+		{name: "dissolved to active", from: model.OrganizationStatusDissolved, to: model.OrganizationStatusActive},
+		{name: "dissolved to disabled", from: model.OrganizationStatusDissolved, to: model.OrganizationStatusDisabled},
+		{name: "dissolved to dissolving", from: model.OrganizationStatusDissolved, to: model.OrganizationStatusDissolving},
+	}
+
+	for index, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			owner := createOrganizationManagementUser(t, db, fmt.Sprintf("status-machine-owner-%d", index), common.RoleCommonUser, 0, "")
+			organization := createOrganizationManagementOrganization(t, db, owner.Id, testCase.from)
+			updated, err := UpdateOrganizationStatusForPlatform(actor.Id, UpdateOrganizationStatusParams{
+				OrganizationID: organization.Id,
+				Status:         testCase.to,
+				RequestID:      fmt.Sprintf("status-machine-%d", index),
+			})
+
+			var persisted model.Organization
+			require.NoError(t, db.First(&persisted, organization.Id).Error)
+			if testCase.allowed {
+				require.NoError(t, err)
+				require.NotNil(t, updated)
+				assert.Equal(t, testCase.to, updated.Status)
+				assert.Equal(t, testCase.to, persisted.Status)
+				return
+			}
+			assert.ErrorIs(t, err, ErrOrganizationStatusTransition)
+			assert.Nil(t, updated)
+			assert.Equal(t, testCase.from, persisted.Status)
+		})
+	}
+}
+
+func TestUpdateDefaultOrganizationStatusForPlatformIsRejectedForRoot(t *testing.T) {
+	db := setupOrganizationManagementTestDB(t)
+	actor := createOrganizationManagementUser(t, db, "default-status-root", common.RoleRootUser, 0, "")
+	owner := createOrganizationManagementUser(t, db, "default-status-owner", common.RoleCommonUser, 0, "")
+	systemKey := model.DefaultOrganizationSystemKey
+	organization := model.Organization{
+		Name: "Default", SystemKey: &systemKey, Status: model.OrganizationStatusActive,
+		OwnerUserId: owner.Id, PolicyVersion: 1,
+	}
+	require.NoError(t, db.Create(&organization).Error)
+	require.NoError(t, db.Create(&model.OrganizationFundAccount{OrganizationId: organization.Id}).Error)
+
+	for index, status := range []model.OrganizationStatus{
+		model.OrganizationStatusDisabled,
+		model.OrganizationStatusDissolving,
+		model.OrganizationStatusDissolved,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			updated, err := UpdateOrganizationStatusForPlatform(actor.Id, UpdateOrganizationStatusParams{
+				OrganizationID: organization.Id,
+				Status:         status,
+				RequestID:      fmt.Sprintf("default-status-%d", index),
+			})
+			assert.ErrorIs(t, err, model.ErrDefaultOrganizationConflict)
+			assert.Nil(t, updated)
+
+			var persisted model.Organization
+			require.NoError(t, db.First(&persisted, organization.Id).Error)
+			assert.Equal(t, model.OrganizationStatusActive, persisted.Status)
+		})
+	}
+}
+
 func TestListOrganizationsForPlatformRequiresPlatformRoleAndIncludesCounts(t *testing.T) {
 	db := setupOrganizationManagementTestDB(t)
 	actor := createOrganizationManagementUser(t, db, "list-admin", common.RoleAdminUser, 0, "")
@@ -230,12 +312,15 @@ func TestListOrganizationsForPlatformRequiresPlatformRoleAndIncludesCounts(t *te
 		"organization_id":   organization.Id,
 		"organization_role": model.OrganizationRoleOwner,
 	}).Error)
+	require.NoError(t, db.Model(&model.OrganizationFundAccount{}).
+		Where("organization_id = ?", organization.Id).Update("quota", 4321).Error)
 
 	result, err := ListOrganizationsForPlatform(actor.Id, ListOrganizationsParams{Limit: 10})
 	require.NoError(t, err)
 	require.Len(t, result.Items, 1)
 	assert.Equal(t, int64(2), result.Items[0].MemberCount)
 	assert.Equal(t, "list-owner", result.Items[0].OwnerUsername)
+	assert.Equal(t, int64(4321), result.Items[0].FundQuota)
 
 	_, err = ListOrganizationsForPlatform(owner.Id, ListOrganizationsParams{Limit: 10})
 	assert.ErrorIs(t, err, ErrPlatformProvisioningForbidden)

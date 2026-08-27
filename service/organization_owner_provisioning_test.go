@@ -98,18 +98,34 @@ func TestCreditOrganizationFundForPlatformIsIdempotentAndPlatformOnly(t *testing
 	require.NoError(t, err)
 	assert.False(t, first.AlreadyApplied)
 	assert.Equal(t, int64(1200), first.PoolQuotaAfter)
-	second, err := CreditOrganizationFundForPlatform(admin.Id, params)
+	retryParams := params
+	retryParams.RequestID = "fund-credit-request-42-retry"
+	second, err := CreditOrganizationFundForPlatform(admin.Id, retryParams)
 	require.NoError(t, err)
 	assert.True(t, second.AlreadyApplied)
 	assert.Equal(t, first.LedgerId, second.LedgerId)
+
+	conflictingParams := retryParams
+	conflictingParams.Amount = 1201
+	conflictingParams.RequestID = "fund-credit-request-42-conflict"
+	_, err = CreditOrganizationFundForPlatform(admin.Id, conflictingParams)
+	assert.ErrorIs(t, err, model.ErrOrganizationAccountingIdempotency)
 
 	var account model.OrganizationFundAccount
 	require.NoError(t, db.Where("organization_id = ?", organization.Id).First(&account).Error)
 	assert.Equal(t, int64(1200), account.Quota)
 
+	_, err = CreditOrganizationFundForPlatform(admin.Id, CreditOrganizationFundForPlatformParams{
+		OrganizationID: organization.Id,
+		Amount:         1,
+		RequestID:      "fund-credit-missing-reference",
+	})
+	assert.ErrorIs(t, err, ErrOrganizationFundReferenceRequired)
+
 	_, err = CreditOrganizationFundForPlatform(tenantOwner.Id, CreditOrganizationFundForPlatformParams{
 		OrganizationID: organization.Id,
 		Amount:         1,
+		Reference:      "offline-receipt-forbidden",
 		RequestID:      "fund-credit-forbidden",
 	})
 	assert.ErrorIs(t, err, ErrPlatformProvisioningForbidden)

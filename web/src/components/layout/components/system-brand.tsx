@@ -24,6 +24,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
+import type { TenantOrganizationSummary } from '@/features/organizations/types'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { cn } from '@/lib/utils'
@@ -31,6 +32,7 @@ import { cn } from '@/lib/utils'
 type SystemBrandProps = {
   defaultName?: string
   defaultVersion?: string
+  organization?: Pick<TenantOrganizationSummary, 'is_default' | 'name'>
   /**
    * Visual layout:
    * - 'sidebar': stacked card style (used inside the sidebar header).
@@ -52,6 +54,13 @@ export function SystemBrand(props: SystemBrandProps) {
 
   const variant = props.variant ?? 'sidebar'
   const name = systemName || props.defaultName || 'New API'
+  const organizationName =
+    props.organization?.is_default === false
+      ? props.organization.name.trim()
+      : ''
+  const organizationLabel = organizationName
+    ? t('for {{organization}}', { organization: organizationName })
+    : ''
   const version =
     status?.version || props.defaultVersion || t('Unknown version')
 
@@ -61,18 +70,34 @@ export function SystemBrand(props: SystemBrandProps) {
         to='/'
         aria-label={t('Go to home')}
         className={cn(
-          'text-foreground inline-flex h-7 items-center gap-1.5 rounded-md px-1.5 text-sm font-medium transition-colors outline-none select-none',
+          'text-foreground inline-flex h-9 min-w-0 max-w-[calc(100vw-14rem)] items-center gap-2 overflow-hidden rounded-md px-1.5 transition-colors outline-none select-none sm:max-w-sm',
           'hover:bg-accent focus-visible:ring-ring/40 focus-visible:ring-2'
         )}
       >
-        <div className='flex size-5 items-center justify-center overflow-hidden rounded-md'>
+        <div className='flex size-6 shrink-0 items-center justify-center overflow-hidden rounded-md'>
           <img
             src={logo}
             alt={t('Logo')}
             className='size-full rounded-md object-contain'
           />
         </div>
-        <span className='max-w-[12rem] truncate'>{name}</span>
+        <span className='flex min-w-0 items-baseline gap-1.5 overflow-hidden'>
+          <span
+            data-slot='system-brand-name'
+            className='max-w-48 shrink-0 truncate text-lg leading-none font-semibold'
+          >
+            {name}
+          </span>
+          {organizationLabel && (
+            <span
+              data-slot='system-brand-organization'
+              className='text-muted-foreground min-w-0 truncate text-xs leading-none font-normal'
+              title={organizationLabel}
+            >
+              {organizationLabel}
+            </span>
+          )}
+        </span>
       </Link>
     )
   }

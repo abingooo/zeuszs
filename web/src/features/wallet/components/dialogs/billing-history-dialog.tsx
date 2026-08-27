@@ -54,15 +54,20 @@ import {
   getPaymentMethodName,
   formatTimestamp,
 } from '../../lib/billing'
+import type { TopupRecord, TopUpTarget } from '../../types'
 
 interface BillingHistoryDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  target: TopUpTarget
+  organizationName?: string
 }
 
 export function BillingHistoryDialog({
   open,
   onOpenChange,
+  target,
+  organizationName,
 }: BillingHistoryDialogProps) {
   const { t } = useTranslation()
   const {
@@ -78,18 +83,18 @@ export function BillingHistoryDialog({
     handlePageSizeChange,
     handleSearch,
     handleCompleteOrder,
-  } = useBillingHistory()
+  } = useBillingHistory({ target })
 
-  const [confirmTradeNo, setConfirmTradeNo] = useState<string | null>(null)
+  const [confirmOrder, setConfirmOrder] = useState<TopupRecord | null>(null)
   const { copyToClipboard, copiedText } = useCopyToClipboard({ notify: false })
 
   const totalPages = Math.ceil(total / pageSize)
 
   const handleConfirmComplete = async () => {
-    if (confirmTradeNo) {
-      const success = await handleCompleteOrder(confirmTradeNo)
+    if (confirmOrder) {
+      const success = await handleCompleteOrder(confirmOrder)
       if (success) {
-        setConfirmTradeNo(null)
+        setConfirmOrder(null)
       }
     }
   }
@@ -101,7 +106,9 @@ export function BillingHistoryDialog({
         onOpenChange={onOpenChange}
         title={t('Billing History')}
         description={t(
-          'View your topup transaction records and payment history'
+          target === 'organization'
+            ? 'View organization topup transactions and payment history'
+            : 'View your topup transaction records and payment history'
         )}
         contentClassName='flex max-h-[calc(100dvh-2rem)] flex-col max-sm:w-screen max-sm:max-w-none max-sm:rounded-none max-sm:p-4 sm:max-w-4xl'
         contentHeight='auto'
@@ -128,7 +135,7 @@ export function BillingHistoryDialog({
               ]}
               value={pageSize.toString()}
               onValueChange={(value) =>
-                value !== null && handlePageSizeChange(parseInt(value))
+                value !== null && handlePageSizeChange(Number.parseInt(value))
               }
             >
               <SelectTrigger className='h-9 w-[92px] sm:w-32'>
@@ -147,10 +154,10 @@ export function BillingHistoryDialog({
 
           {/* Records List */}
           <div className='max-h-[min(54vh,520px)] overflow-y-auto pr-1'>
-            {loading ? (
+            {loading && (
               <div className='space-y-3'>
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className='rounded-lg border p-3 sm:p-4'>
+                {['first', 'second', 'third', 'fourth', 'fifth'].map((key) => (
+                  <div key={key} className='rounded-lg border p-3 sm:p-4'>
                     <div className='flex items-start justify-between'>
                       <div className='flex-1 space-y-2'>
                         <Skeleton className='h-4 w-48' />
@@ -166,7 +173,8 @@ export function BillingHistoryDialog({
                   </div>
                 ))}
               </div>
-            ) : records.length === 0 ? (
+            )}
+            {!loading && records.length === 0 && (
               <div className='text-muted-foreground flex min-h-40 flex-col items-center justify-center py-10 text-center'>
                 <p className='text-sm font-medium'>
                   {t('No billing records found')}
@@ -177,10 +185,25 @@ export function BillingHistoryDialog({
                     : t('Your transaction history will appear here')}
                 </p>
               </div>
-            ) : (
+            )}
+            {!loading && records.length > 0 && (
               <div className='space-y-3'>
                 {records.map((record) => {
                   const statusConfig = getStatusConfig(record.status)
+                  const hasKnownTarget =
+                    record.topup_target === 'personal' ||
+                    record.topup_target === 'organization'
+                  let targetLabel = t('Unknown')
+                  if (record.topup_target === 'personal') {
+                    targetLabel = t('Personal wallet')
+                  } else if (record.topup_target === 'organization') {
+                    const recordOrganizationName =
+                      record.organization_name ||
+                      (target === 'organization' ? organizationName : undefined)
+                    targetLabel = recordOrganizationName
+                      ? `${t('Organization wallet')}: ${recordOrganizationName}`
+                      : t('Organization wallet')
+                  }
                   return (
                     <div
                       key={record.id}
@@ -213,6 +236,12 @@ export function BillingHistoryDialog({
                                 copyText={String(record.user_id)}
                               />
                             )}
+                            <StatusBadge
+                              label={targetLabel}
+                              variant='neutral'
+                              size='sm'
+                              copyable={false}
+                            />
                           </div>
                           <div className='text-muted-foreground text-xs'>
                             {formatTimestamp(record.create_time)}
@@ -259,18 +288,20 @@ export function BillingHistoryDialog({
                       </div>
 
                       {/* Admin Actions */}
-                      {isAdmin && record.status === 'pending' && (
-                        <div className='mt-4 flex justify-end'>
-                          <Button
-                            size='sm'
-                            variant='outline'
-                            onClick={() => setConfirmTradeNo(record.trade_no)}
-                            disabled={completing}
-                          >
-                            {t('Complete Order')}
-                          </Button>
-                        </div>
-                      )}
+                      {isAdmin &&
+                        record.status === 'pending' &&
+                        hasKnownTarget && (
+                          <div className='mt-4 flex justify-end'>
+                            <Button
+                              size='sm'
+                              variant='outline'
+                              onClick={() => setConfirmOrder(record)}
+                              disabled={completing}
+                            >
+                              {t('Complete Order')}
+                            </Button>
+                          </div>
+                        )}
                     </div>
                   )
                 })}
@@ -317,15 +348,15 @@ export function BillingHistoryDialog({
 
       {/* Confirm Complete Order Dialog */}
       <AlertDialog
-        open={!!confirmTradeNo}
-        onOpenChange={(open) => !open && setConfirmTradeNo(null)}
+        open={!!confirmOrder}
+        onOpenChange={(open) => !open && setConfirmOrder(null)}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('Complete Order')}</AlertDialogTitle>
             <AlertDialogDescription>
               {t(
-                'Are you sure you want to manually complete this order? The user will be credited with the corresponding quota.'
+                'Are you sure you want to manually complete this order? The selected wallet will be credited with the corresponding quota.'
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>

@@ -254,12 +254,31 @@ func SetApiRouter(router *gin.Engine) {
 			organizationRoute.PUT("/topup-policy", middleware.RequireOrganizationAction(service.OrganizationActionTopupPolicyUpdate), controller.UpdateTenantOrganizationTopupPolicy)
 			organizationRoute.GET("/ledger", middleware.RequireOrganizationAction(service.OrganizationActionLedgerRead), controller.ListTenantOrganizationLedger)
 			organizationRoute.GET("/audit", middleware.RequireOrganizationAction(service.OrganizationActionAuditRead), controller.ListTenantOrganizationAudit)
+			organizationTopupRoute := organizationRoute.Group("/topup")
+			organizationTopupRoute.Use(
+				middleware.RequireOrganizationAction(service.OrganizationActionFundTopup),
+				middleware.OrganizationFundTopUpTarget(),
+			)
+			{
+				organizationTopupRoute.GET("/info", controller.GetTopUpInfo)
+				organizationTopupRoute.GET("/self", controller.GetUserTopUps)
+				organizationTopupRoute.POST("/pay", middleware.CriticalRateLimit(), controller.RequestEpay)
+				organizationTopupRoute.POST("/amount", controller.RequestAmount)
+				organizationTopupRoute.POST("/stripe/pay", middleware.CriticalRateLimit(), controller.RequestStripePay)
+				organizationTopupRoute.POST("/stripe/amount", controller.RequestStripeAmount)
+				organizationTopupRoute.POST("/creem/pay", middleware.CriticalRateLimit(), controller.RequestCreemPay)
+				organizationTopupRoute.POST("/waffo/amount", controller.RequestWaffoAmount)
+				organizationTopupRoute.POST("/waffo/pay", middleware.CriticalRateLimit(), controller.RequestWaffoPay)
+				organizationTopupRoute.POST("/waffo-pancake/amount", controller.RequestWaffoPancakeAmount)
+				organizationTopupRoute.POST("/waffo-pancake/pay", middleware.CriticalRateLimit(), controller.RequestWaffoPancakePay)
+			}
 		}
 		organizationAdminRoute := apiRouter.Group("/organization/admin")
 		organizationAdminRoute.Use(middleware.AdminAuth())
 		{
 			organizationAdminRoute.GET("/", controller.ListPlatformOrganizations)
 			organizationAdminRoute.POST("/", controller.CreatePlatformOrganization)
+			organizationAdminRoute.POST("/topup/complete", controller.AdminCompleteOrganizationTopUp)
 			organizationAdminRoute.PATCH("/:id/status", controller.UpdatePlatformOrganizationStatus)
 			organizationAdminRoute.PUT("/:id/status", controller.UpdatePlatformOrganizationStatus)
 			organizationAdminRoute.PATCH("/:id/members/:user_id/role", controller.AssignPlatformOrganizationMemberRole)

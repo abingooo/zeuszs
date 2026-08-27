@@ -61,6 +61,7 @@ func TestTenantOrganizationSummaryAndMemberListStayInScope(t *testing.T) {
 	memberSummary, err := GetTenantOrganizationSummary(tenantPrincipal(member))
 	require.NoError(t, err)
 	assert.Equal(t, organization.Id, memberSummary.OrganizationID)
+	assert.False(t, memberSummary.IsDefault)
 	assert.Equal(t, model.OrganizationRoleMember, memberSummary.CurrentUserRole)
 	assert.Nil(t, memberSummary.OwnerUserID)
 	assert.Nil(t, memberSummary.PolicyVersion)
@@ -79,6 +80,7 @@ func TestTenantOrganizationSummaryAndMemberListStayInScope(t *testing.T) {
 	require.NotNil(t, managementSummary.MemberCount)
 	assert.EqualValues(t, 900, *managementSummary.FundQuota)
 	assert.EqualValues(t, 2, *managementSummary.MemberCount)
+	assert.False(t, managementSummary.IsDefault)
 
 	result, err := ListTenantOrganizationMembers(tenantPrincipal(owner), ListOrganizationMembersParams{Limit: 10})
 	require.NoError(t, err)
@@ -94,6 +96,34 @@ func TestTenantOrganizationSummaryAndMemberListStayInScope(t *testing.T) {
 
 	_, err = ListTenantOrganizationMembers(tenantPrincipal(member), ListOrganizationMembersParams{Limit: 10})
 	assert.ErrorIs(t, err, ErrOrganizationActionForbidden)
+}
+
+func TestDefaultOrganizationSummaryRejectsOrdinaryMember(t *testing.T) {
+	db := setupOrganizationManagementTestDB(t)
+	owner := createOrganizationManagementUser(t, db, "default-tenant-owner", common.RoleCommonUser, 0, "")
+	systemKey := model.DefaultOrganizationSystemKey
+	organization := model.Organization{
+		Name: "Renamed platform tenant", SystemKey: &systemKey,
+		Status: model.OrganizationStatusActive, OwnerUserId: owner.Id, PolicyVersion: 1,
+	}
+	require.NoError(t, db.Create(&organization).Error)
+	require.NoError(t, db.Create(&model.OrganizationFundAccount{OrganizationId: organization.Id}).Error)
+	require.NoError(t, db.Model(&model.User{}).Where("id = ?", owner.Id).Updates(map[string]interface{}{
+		"organization_id": organization.Id, "organization_role": model.OrganizationRoleOwner,
+		"organization_status": model.OrganizationMemberStatusActive,
+	}).Error)
+	owner.OrganizationId = organization.Id
+	owner.OrganizationRole = model.OrganizationRoleOwner
+	owner.OrganizationStatus = model.OrganizationMemberStatusActive
+	member := createOrganizationManagementUser(t, db, "default-tenant-member", common.RoleCommonUser, organization.Id, model.OrganizationRoleMember)
+
+	_, err := GetTenantOrganizationSummary(tenantPrincipal(member))
+	assert.ErrorIs(t, err, ErrOrganizationActionForbidden)
+
+	summary, err := GetTenantOrganizationSummary(tenantPrincipal(owner))
+	require.NoError(t, err)
+	assert.True(t, summary.IsDefault)
+	assert.Equal(t, "Renamed platform tenant", summary.Name)
 }
 
 func TestTenantInviteAndTopupPolicyRequireOrganizationAdminRole(t *testing.T) {
@@ -306,4 +336,70 @@ func TestTenantLedgerAndAuditQueriesNeverCrossOrganizations(t *testing.T) {
 	_, err = ListTenantOrganizationAudit(tenantPrincipal(member), ListTenantOrganizationAuditParams{Limit: 10})
 	assert.ErrorIs(t, err, ErrOrganizationActionForbidden)
 	assert.False(t, errors.Is(err, gorm.ErrRecordNotFound))
+}
+
+func TestTenantLedgerAndAuditViewsExposeInitiatorAndHandleLegacyNull(t *testing.T) {
+	db := setupOrganizationManagementTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.OrganizationQuotaLedger{}))
+	organization, owner, _, member := createTenantManagementFixture(t)
+	initiatorUserID := member.Id
+
+	ledgers := []model.OrganizationQuotaLedger{
+		{
+			OrganizationId: organization.Id, Operation: model.OrganizationLedgerFundCredit,
+			SourceType: "payment_topup", SourceId: "tenant-initiator-payment", ActorUserId: 0,
+			InitiatorUserId: &initiatorUserID, IdempotencyKey: "tenant-initiator-ledger",
+			Fingerprint: "tenant-initiator-fingerprint", RequestId: "tenant-initiator-request",
+			Status: model.OrganizationLedgerStatusCommitted,
+		},
+		{
+			OrganizationId: organization.Id, Operation: model.OrganizationLedgerFundCredit,
+			SourceType: "legacy", SourceId: "tenant-legacy-payment", ActorUserId: 0,
+			IdempotencyKey: "tenant-legacy-ledger", Fingerprint: "tenant-legacy-fingerprint",
+			RequestId: "tenant-legacy-request", Status: model.OrganizationLedgerStatusCommitted,
+		},
+	}
+	for index := range ledgers {
+		require.NoError(t, db.Create(&ledgers[index]).Error)
+	}
+
+	events := []model.OrganizationAuditEvent{
+		{
+			OrganizationId: organization.Id, ActorUserId: 0, InitiatorUserId: &initiatorUserID,
+			Action: "organization.fund.credit", TargetType: "organization", TargetId: strconv.Itoa(organization.Id),
+			RequestId: "tenant-initiator-request", Metadata: `{"initiator_user_id":1}`,
+		},
+		{
+			OrganizationId: organization.Id, ActorUserId: 0, Action: "organization.fund.credit",
+			TargetType: "organization", TargetId: strconv.Itoa(organization.Id),
+			RequestId: "tenant-legacy-request", Metadata: `{}`,
+		},
+	}
+	for index := range events {
+		require.NoError(t, db.Create(&events[index]).Error)
+	}
+
+	ledgerResult, err := ListTenantOrganizationLedger(tenantPrincipal(owner), ListTenantOrganizationLedgerParams{Limit: 10})
+	require.NoError(t, err)
+	require.Len(t, ledgerResult.Items, 2)
+	ledgerBySource := make(map[string]TenantOrganizationLedgerView, len(ledgerResult.Items))
+	for _, item := range ledgerResult.Items {
+		ledgerBySource[item.SourceID] = item
+	}
+	require.NotNil(t, ledgerBySource["tenant-initiator-payment"].InitiatorUserID)
+	assert.Equal(t, initiatorUserID, *ledgerBySource["tenant-initiator-payment"].InitiatorUserID)
+	assert.Nil(t, ledgerBySource["tenant-legacy-payment"].InitiatorUserID)
+
+	auditResult, err := ListTenantOrganizationAudit(tenantPrincipal(owner), ListTenantOrganizationAuditParams{
+		Limit: 10, Action: "organization.fund.credit",
+	})
+	require.NoError(t, err)
+	require.Len(t, auditResult.Items, 2)
+	auditByRequest := make(map[string]TenantOrganizationAuditView, len(auditResult.Items))
+	for _, item := range auditResult.Items {
+		auditByRequest[item.RequestID] = item
+	}
+	require.NotNil(t, auditByRequest["tenant-initiator-request"].InitiatorUserID)
+	assert.Equal(t, initiatorUserID, *auditByRequest["tenant-initiator-request"].InitiatorUserID)
+	assert.Nil(t, auditByRequest["tenant-legacy-request"].InitiatorUserID)
 }

@@ -36,6 +36,7 @@ export type Organization = {
   allow_member_topup: boolean
   policy_version: number
   member_count: number
+  fund_quota: number
   created_at: number
   updated_at: number
 }
@@ -141,6 +142,7 @@ export type CreditOrganizationFundResult = {
 export type TenantOrganizationSummary = {
   organization_id: number
   name: string
+  is_default?: boolean
   status: OrganizationStatus
   current_user_role: OrganizationRole
   member_status: OrganizationMemberStatus
@@ -169,6 +171,7 @@ export type TenantOrganizationLedgerEntry = {
   source_type: string
   source_id: string
   actor_user_id: number
+  initiator_user_id?: number
   request_id: string
   user_quota_delta: number
   pool_quota_delta: number
@@ -184,6 +187,7 @@ export type TenantOrganizationLedgerEntry = {
 export type TenantOrganizationAuditEntry = {
   id: number
   actor_user_id: number
+  initiator_user_id?: number
   action: string
   target_type: string
   target_id: string

@@ -60,6 +60,13 @@ export type WaffoPancakePaymentResponse = ApiResponse<
   | string
 >
 
+export type TopUpTarget = 'personal' | 'organization'
+
+export interface TopUpTargetAvailability {
+  enabled: boolean
+  organization_id?: number
+}
+
 /**
  * Creem product configuration
  */
@@ -84,6 +91,8 @@ export interface CreemPaymentRequest {
   product_id: string
   /** Payment method identifier */
   payment_method: 'creem'
+  /** Wallet that receives the purchased quota */
+  topup_target: TopUpTarget
 }
 
 /**
@@ -156,6 +165,12 @@ export interface TopupInfo {
   payment_compliance_confirmed?: boolean
   /** Current compliance terms version */
   payment_compliance_terms_version?: string
+  /** Initial target selected by the server for this endpoint */
+  default_topup_target?: TopUpTarget
+  /** Server-authorized targets for the current user */
+  topup_targets?: Partial<Record<TopUpTarget, TopUpTargetAvailability>>
+  /** Whether the current user may purchase quota for the organization pool */
+  organization_fund_topup_enabled?: boolean
 }
 
 /**
@@ -184,6 +199,8 @@ export interface PaymentRequest {
   amount: number
   /** Payment method identifier */
   payment_method: string
+  /** Wallet that receives the purchased quota */
+  topup_target: TopUpTarget
 }
 
 /**
@@ -194,6 +211,8 @@ export interface WaffoPaymentRequest {
   amount: number
   /** Optional server-side Waffo payment method index */
   pay_method_index?: number
+  /** Wallet that receives the purchased quota */
+  topup_target: TopUpTarget
 }
 
 /**
@@ -202,6 +221,8 @@ export interface WaffoPaymentRequest {
 export interface WaffoPancakePaymentRequest {
   /** Topup amount */
   amount: number
+  /** Wallet that receives the purchased quota */
+  topup_target: TopUpTarget
 }
 
 /**
@@ -210,6 +231,8 @@ export interface WaffoPancakePaymentRequest {
 export interface AmountRequest {
   /** Topup amount to calculate */
   amount: number
+  /** Wallet used for settlement capacity and permission checks */
+  topup_target: TopUpTarget
 }
 
 /**
@@ -265,6 +288,12 @@ export interface TopupRecord {
   trade_no: string
   /** Payment method type */
   payment_method: string
+  /** Wallet credited when this order settles */
+  topup_target?: TopUpTarget
+  /** Organization snapshot for organization-target orders */
+  organization_id?: number
+  /** Organization display name resolved per order for authorized history views */
+  organization_name?: string
   /** Creation timestamp */
   create_time: number
   /** Completion timestamp */
@@ -286,4 +315,5 @@ export interface BillingHistoryResponse {
  */
 export interface CompleteOrderRequest {
   trade_no: string
+  topup_target: TopUpTarget
 }

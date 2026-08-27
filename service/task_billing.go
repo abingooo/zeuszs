@@ -187,16 +187,16 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 	// 1. 退还资金来源（组织预留、旧钱包或订阅）
 	var fundingErr error
 	var counterClamp *common.QuotaClamp
-	organizationWallet := task.OrganizationId > 0 && !taskIsSubscription(task)
-	if taskIsSubscription(task) {
-		fundingErr = taskAdjustFunding(task, -quota)
-	} else if organizationWallet {
+	organizationAtomicBilling := task.OrganizationId > 0 &&
+		(!taskIsSubscription(task) || task.PrivateData.OrganizationSubscriptionMetered)
+	if organizationAtomicBilling {
 		requestId := taskOrganizationAccountingID(task, fmt.Sprintf("refund:%d:%d", billingRevision, quota))
 		mutation, err := model.ApplyOrganizationTaskBillingMutation(model.OrganizationTaskBillingMutationParams{
 			TaskId:                    task.ID,
 			UserId:                    task.UserId,
 			OrganizationId:            task.OrganizationId,
 			OrganizationReservationId: task.PrivateData.OrganizationReservationId,
+			SubscriptionId:            task.PrivateData.SubscriptionId,
 			LegacyOrganizationWallet:  task.LegacyOrganizationWallet,
 			TokenId:                   task.PrivateData.TokenId,
 			ChannelId:                 task.ChannelId,
@@ -221,7 +221,7 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 		logger.LogWarn(ctx, fmt.Sprintf("退还资金来源失败 task %s: %s", task.TaskID, fundingErr.Error()))
 		return false
 	}
-	if !organizationWallet {
+	if !organizationAtomicBilling {
 		// Organization tasks committed token and aggregate usage in the same
 		// transaction as their wallet and task marker above.
 		taskAdjustTokenQuota(ctx, task, -quota)
@@ -248,7 +248,7 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 
 	// 5. 资金退款完成后再清除持久化标记。
 	// 回写失败必须显式告警，避免漏掉潜在的重复退款风险。
-	if !organizationWallet {
+	if !organizationAtomicBilling {
 		task.Quota = 0
 		if err := task.UpdateQuota(); err != nil {
 			logger.LogError(ctx, fmt.Sprintf("退款成功但清除 task quota 失败 task %s: %s", task.TaskID, err.Error()))
@@ -286,10 +286,9 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 	// 调整资金来源
 	var fundingErr error
 	var counterClamp *common.QuotaClamp
-	organizationWallet := task.OrganizationId > 0 && !taskIsSubscription(task)
-	if taskIsSubscription(task) {
-		fundingErr = taskAdjustFunding(task, quotaDelta)
-	} else if organizationWallet {
+	organizationAtomicBilling := task.OrganizationId > 0 &&
+		(!taskIsSubscription(task) || task.PrivateData.OrganizationSubscriptionMetered)
+	if organizationAtomicBilling {
 		phase := fmt.Sprintf("adjust:%d:%d:%d", billingRevision, preConsumedQuota, actualQuota)
 		requestId := taskOrganizationAccountingID(task, phase)
 		mutation, err := model.ApplyOrganizationTaskBillingMutation(model.OrganizationTaskBillingMutationParams{
@@ -297,6 +296,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 			UserId:                    task.UserId,
 			OrganizationId:            task.OrganizationId,
 			OrganizationReservationId: task.PrivateData.OrganizationReservationId,
+			SubscriptionId:            task.PrivateData.SubscriptionId,
 			LegacyOrganizationWallet:  task.LegacyOrganizationWallet,
 			TokenId:                   task.PrivateData.TokenId,
 			ChannelId:                 task.ChannelId,
@@ -321,7 +321,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		logger.LogError(ctx, fmt.Sprintf("差额结算资金调整失败 task %s: %s", task.TaskID, fundingErr.Error()))
 		return
 	}
-	if !organizationWallet {
+	if !organizationAtomicBilling {
 		// Organization tasks committed token and aggregate usage in the same
 		// transaction as their wallet and task marker above.
 		taskAdjustTokenQuota(ctx, task, quotaDelta)

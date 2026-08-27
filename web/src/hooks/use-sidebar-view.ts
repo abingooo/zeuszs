@@ -48,21 +48,30 @@ export function useSidebarView(): ResolvedSidebarView {
   const { t } = useTranslation()
   const pathname = useLocation({ select: (l) => l.pathname })
   const userRole = useAuthStore((s) => s.auth.user?.role)
+  const organizationRole = useAuthStore((s) => s.auth.user?.organization_role)
+  const organizationIsDefault = useAuthStore(
+    (s) => s.auth.user?.organization_is_default
+  )
   const rootSidebarData = useSidebarData()
   const configFilteredRoot = useSidebarConfig(rootSidebarData.navGroups)
 
   const rootNavGroups = useMemo<NavGroup[]>(() => {
     const role = userRole ?? ROLE.GUEST
     const isAdmin = role >= ROLE.ADMIN
+    const hideOrganizationWorkspace =
+      organizationIsDefault === true && organizationRole === 'member'
     return configFilteredRoot
       .filter((group) => (group.id === 'admin' ? isAdmin : true))
       .map((group) => {
-        const items = group.items.filter(
-          (item) => item.requiredRole === undefined || role >= item.requiredRole
-        )
+        const items = group.items.filter((item) => {
+          if ('url' in item && item.url === '/organization') {
+            return !hideOrganizationWorkspace
+          }
+          return item.requiredRole === undefined || role >= item.requiredRole
+        })
         return items.length === group.items.length ? group : { ...group, items }
       })
-  }, [configFilteredRoot, userRole])
+  }, [configFilteredRoot, organizationIsDefault, organizationRole, userRole])
 
   const view = resolveSidebarView(pathname)
 

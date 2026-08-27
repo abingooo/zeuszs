@@ -21,6 +21,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, test } from 'vitest'
 
 import { api } from '@/lib/api'
+import { formatQuota } from '@/lib/format'
 
 import { OrganizationsList } from '../organizations-list'
 
@@ -57,6 +58,7 @@ describe('organization query states', () => {
                 allow_member_topup: false,
                 policy_version: 1,
                 member_count: 2,
+                fund_quota: 2500000,
                 created_at: 1_700_000_000,
                 updated_at: 1_700_000_000,
               },
@@ -87,6 +89,7 @@ describe('organization query states', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
 
     expect(await screen.findAllByText('Research Team')).toHaveLength(2)
+    expect(screen.getAllByText(formatQuota(2_500_000))).toHaveLength(2)
     await waitFor(() => expect(requestCount).toBe(2))
     expect(screen.queryByText('Failed to load')).not.toBeInTheDocument()
   })

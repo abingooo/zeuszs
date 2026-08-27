@@ -42,6 +42,7 @@ const (
 	OrganizationActionMemberLimitUpdate  OrganizationAction = "member.limit.update"
 	OrganizationActionTopupPolicyUpdate  OrganizationAction = "member.topup_policy.update"
 	OrganizationActionMemberTokenDisable OrganizationAction = "member.token.disable"
+	OrganizationActionFundTopup          OrganizationAction = "fund.topup"
 	OrganizationActionBillingRead        OrganizationAction = "billing.read"
 	OrganizationActionLedgerRead         OrganizationAction = "ledger.read"
 	OrganizationActionAuditRead          OrganizationAction = "audit.read"
@@ -61,6 +62,7 @@ var organizationAdminActions = map[OrganizationAction]struct{}{
 	OrganizationActionMemberLimitUpdate:  {},
 	OrganizationActionTopupPolicyUpdate:  {},
 	OrganizationActionMemberTokenDisable: {},
+	OrganizationActionFundTopup:          {},
 	OrganizationActionBillingRead:        {},
 	OrganizationActionLedgerRead:         {},
 	OrganizationActionAuditRead:          {},

@@ -120,12 +120,13 @@ type TaskPrivateData struct {
 	UpstreamTaskID string `json:"upstream_task_id,omitempty"` // 上游真实 task ID
 	ResultURL      string `json:"result_url,omitempty"`       // 任务成功后的结果 URL（视频地址等）
 	// 计费上下文：用于异步退款/差额结算（轮询阶段读取）
-	BillingSource             string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
-	SubscriptionId            int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
-	OrganizationReservationId int64               `json:"organization_reservation_id,omitempty"`
-	TokenId                   int                 `json:"token_id,omitempty"`        // 令牌 ID，用于令牌额度退款
-	NodeName                  string              `json:"node_name,omitempty"`       // 发起任务的节点名，轮询结算阶段据此归属日志而非最后查询节点
-	BillingContext            *TaskBillingContext `json:"billing_context,omitempty"` // 计费参数快照（用于轮询阶段重新计算）
+	BillingSource                   string              `json:"billing_source,omitempty"`  // "wallet" 或 "subscription"
+	SubscriptionId                  int                 `json:"subscription_id,omitempty"` // 订阅 ID，用于订阅退款
+	OrganizationSubscriptionMetered bool                `json:"organization_subscription_metered,omitempty"`
+	OrganizationReservationId       int64               `json:"organization_reservation_id,omitempty"`
+	TokenId                         int                 `json:"token_id,omitempty"`        // 令牌 ID，用于令牌额度退款
+	NodeName                        string              `json:"node_name,omitempty"`       // 发起任务的节点名，轮询结算阶段据此归属日志而非最后查询节点
+	BillingContext                  *TaskBillingContext `json:"billing_context,omitempty"` // 计费参数快照（用于轮询阶段重新计算）
 }
 
 // TaskBillingContext 记录任务提交时的计费参数，以便轮询阶段可以重新计算额度。
@@ -439,6 +440,7 @@ type OrganizationTaskBillingMutationParams struct {
 	UserId                    int
 	OrganizationId            int
 	OrganizationReservationId int64
+	SubscriptionId            int
 	LegacyOrganizationWallet  bool
 	TokenId                   int
 	ChannelId                 int
@@ -461,12 +463,23 @@ var errOrganizationTaskBillingStale = errors.New("organization task billing stat
 // are deliberately updated only after this function commits.
 func ApplyOrganizationTaskBillingMutation(params OrganizationTaskBillingMutationParams) (OrganizationTaskBillingMutationResult, error) {
 	hasReservation := params.OrganizationReservationId > 0
+	hasSubscription := params.SubscriptionId > 0
+	fundingModes := 0
+	if hasReservation {
+		fundingModes++
+	}
+	if hasSubscription {
+		fundingModes++
+	}
+	if params.LegacyOrganizationWallet {
+		fundingModes++
+	}
 	if DB == nil || params.TaskId <= 0 || params.UserId <= 0 || params.OrganizationId <= 0 ||
-		params.OrganizationReservationId < 0 || params.TokenId < 0 || params.ChannelId < 0 ||
+		params.OrganizationReservationId < 0 || params.SubscriptionId < 0 || params.TokenId < 0 || params.ChannelId < 0 ||
 		params.ExpectedQuota <= 0 || params.ExpectedQuota >= common.MaxQuota || params.ExpectedRevision < 0 ||
 		params.ActualQuota < 0 || params.ActualQuota >= common.MaxQuota || params.ActualQuota == params.ExpectedQuota ||
 		strings.TrimSpace(params.OperationId) == "" || len(params.OperationId) > 64 ||
-		hasReservation == params.LegacyOrganizationWallet {
+		fundingModes != 1 {
 		return OrganizationTaskBillingMutationResult{}, ErrOrganizationAccountingInvalid
 	}
 
@@ -481,7 +494,14 @@ func ApplyOrganizationTaskBillingMutation(params OrganizationTaskBillingMutation
 			Kind:   OrganizationAccountingActorSystem,
 			Policy: "async_task_billing",
 		}
-		if hasReservation {
+		if hasSubscription {
+			if err := adjustOrganizationMemberConsumptionTx(tx, params.OrganizationId, params.UserId, int64(quotaDelta)); err != nil {
+				return err
+			}
+			if err := postConsumeUserSubscriptionDeltaTx(tx, params.SubscriptionId, params.UserId, int64(quotaDelta), true); err != nil {
+				return err
+			}
+		} else if hasReservation {
 			if params.ActualQuota == 0 {
 				refunded, delta, err := refundOrganizationWalletQuotaTx(tx, OrganizationWalletRefundParams{
 					ReservationId:  params.OrganizationReservationId,
@@ -558,11 +578,19 @@ func ApplyOrganizationTaskBillingMutation(params OrganizationTaskBillingMutation
 		}
 		if task.UserId != params.UserId || task.OrganizationId != params.OrganizationId ||
 			task.PrivateData.TokenId != params.TokenId || task.ChannelId != params.ChannelId ||
-			task.LegacyOrganizationWallet != params.LegacyOrganizationWallet ||
-			task.PrivateData.BillingSource == taskBillingSourceSubscription {
+			task.LegacyOrganizationWallet != params.LegacyOrganizationWallet {
 			return ErrOrganizationIdentityInvalid
 		}
-		if hasReservation {
+		if hasSubscription {
+			if task.PrivateData.BillingSource != taskBillingSourceSubscription ||
+				task.PrivateData.SubscriptionId != params.SubscriptionId ||
+				!task.PrivateData.OrganizationSubscriptionMetered ||
+				task.PrivateData.OrganizationReservationId != 0 || task.LegacyOrganizationWallet {
+				return ErrOrganizationIdentityInvalid
+			}
+		} else if task.PrivateData.BillingSource == taskBillingSourceSubscription {
+			return ErrOrganizationIdentityInvalid
+		} else if hasReservation {
 			if task.PrivateData.OrganizationReservationId != params.OrganizationReservationId {
 				return ErrOrganizationIdentityInvalid
 			}
@@ -635,6 +663,18 @@ func ApplyOrganizationTaskBillingMutation(params OrganizationTaskBillingMutation
 	})
 	if errors.Is(err, errOrganizationTaskBillingStale) {
 		return OrganizationTaskBillingMutationResult{QuotaDelta: quotaDelta}, nil
+	}
+	if err != nil && hasSubscription && quotaDelta < 0 {
+		var persisted Task
+		lookupErr := DB.First(&persisted, params.TaskId).Error
+		if lookupErr == nil && persisted.UserId == params.UserId && persisted.OrganizationId == params.OrganizationId &&
+			persisted.ChannelId == params.ChannelId && persisted.PrivateData.TokenId == params.TokenId &&
+			persisted.PrivateData.BillingSource == taskBillingSourceSubscription &&
+			persisted.PrivateData.SubscriptionId == params.SubscriptionId &&
+			persisted.PrivateData.OrganizationSubscriptionMetered &&
+			persisted.BillingRevision > params.ExpectedRevision {
+			return OrganizationTaskBillingMutationResult{QuotaDelta: quotaDelta}, nil
+		}
 	}
 	if err != nil {
 		return OrganizationTaskBillingMutationResult{}, err

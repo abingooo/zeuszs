@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
@@ -13,25 +14,45 @@ import (
 )
 
 type TopUp struct {
-	Id              int     `json:"id"`
-	UserId          int     `json:"user_id" gorm:"index"`
-	OrganizationId  int     `json:"organization_id" gorm:"index"`
-	ProjectId       *int    `json:"project_id,omitempty" gorm:"index"`
-	Amount          int64   `json:"amount"`
-	Money           float64 `json:"money"`
-	TradeNo         string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
-	PaymentMethod   string  `json:"payment_method" gorm:"type:varchar(50)"`
-	PaymentProvider string  `json:"payment_provider" gorm:"type:varchar(50);default:''"`
-	CreateTime      int64   `json:"create_time"`
-	CompleteTime    int64   `json:"complete_time"`
-	Status          string  `json:"status"`
+	Id               int     `json:"id"`
+	UserId           int     `json:"user_id" gorm:"index"`
+	OrganizationId   int     `json:"organization_id" gorm:"index"`
+	ProjectId        *int    `json:"project_id,omitempty" gorm:"index"`
+	Amount           int64   `json:"amount"`
+	Money            float64 `json:"money"`
+	TradeNo          string  `json:"trade_no" gorm:"unique;type:varchar(255);index"`
+	PaymentMethod    string  `json:"payment_method" gorm:"type:varchar(50)"`
+	PaymentProvider  string  `json:"payment_provider" gorm:"type:varchar(50);default:''"`
+	TopUpTarget      string  `json:"topup_target" gorm:"type:varchar(32);not null;default:personal;<-:create"`
+	CreateTime       int64   `json:"create_time"`
+	CompleteTime     int64   `json:"complete_time"`
+	Status           string  `json:"status"`
+	OrganizationName string  `json:"organization_name,omitempty" gorm:"-"`
 }
 
 // BeforeCreate snapshots the authoritative organization from the owning user.
 // This also covers provider-specific and subscription-created rows that bypass
 // the convenience Insert method.
 func (topUp *TopUp) BeforeCreate(tx *gorm.DB) error {
-	return overwriteOrganizationSnapshot(tx, topUp.UserId, &topUp.OrganizationId)
+	target, err := NormalizeTopUpTarget(topUp.TopUpTarget)
+	if err != nil {
+		return err
+	}
+	topUp.TopUpTarget = target
+	if err := overwriteOrganizationSnapshot(tx, topUp.UserId, &topUp.OrganizationId); err != nil {
+		return err
+	}
+	if target != TopUpTargetOrganization {
+		return nil
+	}
+	account, err := loadOrganizationFundTopUpScope(tx, topUp.UserId)
+	if err != nil {
+		return err
+	}
+	if account.OrganizationId != topUp.OrganizationId {
+		return ErrOrganizationIdentityInvalid
+	}
+	return nil
 }
 
 const (
@@ -40,6 +61,11 @@ const (
 	PaymentMethodWaffo        = "waffo"
 	PaymentMethodWaffoPancake = "waffo_pancake"
 	PaymentMethodBalance      = "balance"
+)
+
+const (
+	TopUpTargetPersonal     = "personal"
+	TopUpTargetOrganization = "organization"
 )
 
 const (
@@ -56,8 +82,28 @@ var (
 	ErrTopUpNotFound           = errors.New("topup not found")
 	ErrTopUpStatusInvalid      = errors.New("topup status invalid")
 	ErrInvalidTopUpQuota       = errors.New("invalid top-up quota")
+	ErrInvalidTopUpTarget      = errors.New("invalid top-up target")
 	ErrTopUpQuotaLimitExceeded = errors.New("top-up quota limit exceeded")
 )
+
+func NormalizeTopUpTarget(target string) (string, error) {
+	switch strings.TrimSpace(target) {
+	case "", TopUpTargetPersonal:
+		return TopUpTargetPersonal, nil
+	case TopUpTargetOrganization:
+		return TopUpTargetOrganization, nil
+	default:
+		return "", ErrInvalidTopUpTarget
+	}
+}
+
+func (topUp *TopUp) CreditsOrganizationFund() bool {
+	if topUp == nil {
+		return false
+	}
+	target, err := NormalizeTopUpTarget(topUp.TopUpTarget)
+	return err == nil && target == TopUpTargetOrganization
+}
 
 func (topUp *TopUp) Insert() error {
 	var err error
@@ -94,15 +140,80 @@ func ValidateTopUpQuotaCapacity(userId int, creditedQuota int) error {
 	return nil
 }
 
-// creditTopUpQuota atomically enforces the int32 wallet ceiling while adding
-// quota. Keeping the predicate and increment in one UPDATE prevents two
-// concurrent callbacks from both passing a separate read/check.
-func creditTopUpQuota(tx *gorm.DB, topUp *TopUp, creditedQuota int, updates map[string]interface{}) (UserWalletCreditResult, error) {
+func loadOrganizationFundTopUpScope(tx *gorm.DB, userId int) (*OrganizationFundAccount, error) {
+	if tx == nil || userId <= 0 {
+		return nil, ErrOrganizationAccountingInvalid
+	}
+	var user User
+	if err := tx.Select("id", "status", "organization_id", "organization_role", "organization_status").
+		Where("id = ?", userId).First(&user).Error; err != nil {
+		return nil, err
+	}
+	if user.Status != common.UserStatusEnabled || user.OrganizationId <= 0 ||
+		user.OrganizationStatus != OrganizationMemberStatusActive ||
+		(user.OrganizationRole != OrganizationRoleOwner && user.OrganizationRole != OrganizationRoleAdmin) {
+		return nil, ErrOrganizationAccountingForbidden
+	}
+	var organization Organization
+	if err := tx.Select("id", "status", "owner_user_id").Where("id = ?", user.OrganizationId).First(&organization).Error; err != nil {
+		return nil, err
+	}
+	if organization.Status != OrganizationStatusActive {
+		return nil, ErrOrganizationNotActive
+	}
+	if user.OrganizationRole == OrganizationRoleOwner && organization.OwnerUserId != user.Id {
+		return nil, ErrOrganizationAccountingForbidden
+	}
+	var account OrganizationFundAccount
+	if err := tx.Where("organization_id = ?", organization.Id).First(&account).Error; err != nil {
+		return nil, err
+	}
+	if account.Quota < 0 {
+		return nil, ErrOrganizationAccountingInvalid
+	}
+	return &account, nil
+}
+
+// ValidateOrganizationFundTopUpCapacity authorizes an Owner/Admin checkout
+// and rejects a payment that could not be committed to the int64 fund pool.
+// Settlement repeats the overflow check atomically after the provider pays.
+func ValidateOrganizationFundTopUpCapacity(userId int, creditedQuota int) error {
+	if _, err := topUpQuotaMaxCurrent(creditedQuota); err != nil {
+		return err
+	}
+	account, err := loadOrganizationFundTopUpScope(DB, userId)
+	if err != nil {
+		return err
+	}
+	if account.Quota > math.MaxInt64-int64(creditedQuota) {
+		return ErrOrganizationFundOverflow
+	}
+	return nil
+}
+
+type topUpCreditResult struct {
+	userWallet UserWalletCreditResult
+}
+
+func syncTopUpCreditCache(topUp *TopUp, amount int64, result topUpCreditResult, operation string) {
+	if topUp == nil || topUp.CreditsOrganizationFund() {
+		return
+	}
+	syncUserWalletCreditCache(topUp.UserId, amount, result.userWallet, operation)
+}
+
+// creditTopUpQuota settles a paid order to its immutable target. Both target
+// paths enforce capacity and idempotency in the same transaction as the order.
+func creditTopUpQuota(tx *gorm.DB, topUp *TopUp, creditedQuota int, updates map[string]interface{}) (topUpCreditResult, error) {
 	if tx == nil || topUp == nil || topUp.UserId <= 0 || strings.TrimSpace(topUp.TradeNo) == "" {
-		return UserWalletCreditResult{}, ErrInvalidTopUpQuota
+		return topUpCreditResult{}, ErrInvalidTopUpQuota
 	}
 	if _, err := topUpQuotaMaxCurrent(creditedQuota); err != nil {
-		return UserWalletCreditResult{}, err
+		return topUpCreditResult{}, err
+	}
+	target, err := NormalizeTopUpTarget(topUp.TopUpTarget)
+	if err != nil {
+		return topUpCreditResult{}, err
 	}
 	provider := strings.TrimSpace(topUp.PaymentProvider)
 	if provider == "" {
@@ -121,30 +232,50 @@ func creditTopUpQuota(tx *gorm.DB, topUp *TopUp, creditedQuota int, updates map[
 		requestId = organizationAccountingFingerprint("topup-request", provider, topUp.TradeNo)
 	}
 
-	credit, err := CreditUserWalletTx(tx, UserWalletCreditParams{
-		UserId:         topUp.UserId,
-		Amount:         int64(creditedQuota),
-		SourceType:     "payment_topup",
-		SourceId:       sourceId,
-		IdempotencyKey: idempotencyKey,
-		RequestId:      requestId,
-		Actor: OrganizationAccountingActor{
-			Kind:   OrganizationAccountingActorSystem,
-			Policy: "payment_settlement",
-		},
-	})
-	if errors.Is(err, ErrOrganizationUserQuotaLimit) {
-		return UserWalletCreditResult{}, ErrTopUpQuotaLimitExceeded
+	result := topUpCreditResult{}
+	if target == TopUpTargetOrganization {
+		if topUp.OrganizationId <= 0 {
+			return topUpCreditResult{}, ErrOrganizationIdentityInvalid
+		}
+		_, err = CreditOrganizationFundTx(tx, OrganizationFundCreditParams{
+			OrganizationId: topUp.OrganizationId,
+			Amount:         int64(creditedQuota),
+			SourceType:     "payment_topup",
+			SourceId:       sourceId,
+			IdempotencyKey: idempotencyKey,
+			RequestId:      requestId,
+			Actor: OrganizationAccountingActor{
+				Kind:            OrganizationAccountingActorSystem,
+				InitiatorUserId: topUp.UserId,
+				Policy:          "payment_settlement",
+			},
+		})
+	} else {
+		result.userWallet, err = CreditUserWalletTx(tx, UserWalletCreditParams{
+			UserId:         topUp.UserId,
+			Amount:         int64(creditedQuota),
+			SourceType:     "payment_topup",
+			SourceId:       sourceId,
+			IdempotencyKey: idempotencyKey,
+			RequestId:      requestId,
+			Actor: OrganizationAccountingActor{
+				Kind:   OrganizationAccountingActorSystem,
+				Policy: "payment_settlement",
+			},
+		})
+		if errors.Is(err, ErrOrganizationUserQuotaLimit) {
+			return topUpCreditResult{}, ErrTopUpQuotaLimitExceeded
+		}
 	}
 	if err != nil {
-		return UserWalletCreditResult{}, err
+		return topUpCreditResult{}, err
 	}
 	if len(updates) > 0 {
 		if err := tx.Model(&User{}).Where("id = ?", topUp.UserId).Updates(updates).Error; err != nil {
-			return UserWalletCreditResult{}, err
+			return topUpCreditResult{}, err
 		}
 	}
-	return credit, nil
+	return result, nil
 }
 
 func (topUp *TopUp) Update() error {
@@ -215,7 +346,7 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (
 	}
 
 	var quotaToAdd int
-	var creditResult UserWalletCreditResult
+	var creditResult topUpCreditResult
 	topUp := &TopUp{}
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
@@ -258,7 +389,7 @@ func RechargeEpay(tradeNo string, actualPaymentMethod string, callerIp string) (
 	if alreadyDone {
 		return true, nil
 	}
-	syncUserWalletCreditCache(topUp.UserId, int64(quotaToAdd), creditResult, "epay topup")
+	syncTopUpCreditCache(topUp, int64(quotaToAdd), creditResult, "epay topup")
 
 	common.SysLog(fmt.Sprintf("易支付充值成功 trade_no=%s user_id=%d quota_to_add=%d money=%.2f", topUp.TradeNo, topUp.UserId, quotaToAdd, topUp.Money))
 	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%f", logger.LogQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentProviderEpay)
@@ -271,7 +402,8 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 	}
 
 	var quota int
-	var creditResult UserWalletCreditResult
+	var creditResult topUpCreditResult
+	alreadyDone := false
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -289,6 +421,10 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 			return ErrPaymentMethodMismatch
 		}
 
+		if topUp.Status == common.TopUpStatusSuccess {
+			alreadyDone = true
+			return nil
+		}
 		if topUp.Status != common.TopUpStatusPending {
 			return errors.New("充值订单状态错误")
 		}
@@ -316,7 +452,10 @@ func Recharge(referenceId string, customerId string, callerIp string) (err error
 		common.SysError("topup failed: " + err.Error())
 		return errors.New("充值失败，请稍后重试")
 	}
-	syncUserWalletCreditCache(topUp.UserId, int64(quota), creditResult, "stripe topup")
+	if alreadyDone {
+		return nil
+	}
+	syncTopUpCreditCache(topUp, int64(quota), creditResult, "stripe topup")
 
 	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用在线充值成功，充值金额: %v，支付金额：%d", logger.FormatQuota(quota), topUp.Amount), callerIp, topUp.PaymentMethod, PaymentMethodStripe)
 
@@ -346,14 +485,19 @@ func GetUserTopUps(userId int, pageInfo *common.PageInfo) (topups []*TopUp, tota
 	cutoff := topUpQueryCutoff()
 
 	// Get total count within transaction
-	err = tx.Model(&TopUp{}).Where("user_id = ? AND create_time >= ?", userId, cutoff).Count(&total).Error
+	err = tx.Model(&TopUp{}).
+		Where("user_id = ? AND create_time >= ?", userId, cutoff).
+		Where("(top_up_target = ? OR top_up_target = '' OR top_up_target IS NULL)", TopUpTargetPersonal).
+		Count(&total).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
 	}
 
 	// Get paginated topups within same transaction
-	err = tx.Where("user_id = ? AND create_time >= ?", userId, cutoff).Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error
+	err = tx.Where("user_id = ? AND create_time >= ?", userId, cutoff).
+		Where("(top_up_target = ? OR top_up_target = '' OR top_up_target IS NULL)", TopUpTargetPersonal).
+		Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error
 	if err != nil {
 		tx.Rollback()
 		return nil, 0, err
@@ -364,6 +508,89 @@ func GetUserTopUps(userId int, pageInfo *common.PageInfo) (topups []*TopUp, tota
 		return nil, 0, err
 	}
 
+	return topups, total, nil
+}
+
+func enrichTopUpOrganizationNames(tx *gorm.DB, topups []*TopUp) error {
+	organizationIds := make([]int, 0)
+	seen := make(map[int]struct{})
+	for _, topUp := range topups {
+		if topUp == nil {
+			continue
+		}
+		topUp.OrganizationName = ""
+		if topUp.TopUpTarget != TopUpTargetOrganization || topUp.OrganizationId <= 0 {
+			continue
+		}
+		if _, exists := seen[topUp.OrganizationId]; exists {
+			continue
+		}
+		seen[topUp.OrganizationId] = struct{}{}
+		organizationIds = append(organizationIds, topUp.OrganizationId)
+	}
+	if len(organizationIds) == 0 {
+		return nil
+	}
+
+	var organizations []Organization
+	if err := tx.Select("id", "name").Where("id IN ?", organizationIds).Find(&organizations).Error; err != nil {
+		return err
+	}
+	names := make(map[int]string, len(organizations))
+	for _, organization := range organizations {
+		names[organization.Id] = organization.Name
+	}
+	for _, topUp := range topups {
+		if topUp != nil && topUp.TopUpTarget == TopUpTargetOrganization {
+			topUp.OrganizationName = names[topUp.OrganizationId]
+		}
+	}
+	return nil
+}
+
+// GetOrganizationTopUps returns organization-fund purchases initiated by any
+// Owner/Admin in the tenant. Personal wallet purchases are never included.
+func GetOrganizationTopUps(organizationId int, keyword string, pageInfo *common.PageInfo) (topups []*TopUp, total int64, err error) {
+	if organizationId <= 0 || pageInfo == nil {
+		return nil, 0, ErrOrganizationAccountingInvalid
+	}
+	tx := DB.Begin()
+	if tx.Error != nil {
+		return nil, 0, tx.Error
+	}
+	defer func() {
+		if recover() != nil {
+			tx.Rollback()
+		}
+	}()
+
+	query := tx.Model(&TopUp{}).Where(
+		"organization_id = ? AND top_up_target = ? AND create_time >= ?",
+		organizationId, TopUpTargetOrganization, topUpQueryCutoff(),
+	)
+	if strings.TrimSpace(keyword) != "" {
+		pattern, patternErr := sanitizeLikePattern(keyword)
+		if patternErr != nil {
+			tx.Rollback()
+			return nil, 0, patternErr
+		}
+		query = query.Where("trade_no LIKE ? ESCAPE '!'", pattern)
+	}
+	if err = query.Limit(searchTopUpCountHardLimit).Count(&total).Error; err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	if err = query.Order("id desc").Limit(pageInfo.GetPageSize()).Offset(pageInfo.GetStartIdx()).Find(&topups).Error; err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	if err = enrichTopUpOrganizationNames(tx, topups); err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
+	if err = tx.Commit().Error; err != nil {
+		return nil, 0, err
+	}
 	return topups, total, nil
 }
 
@@ -388,7 +615,10 @@ func GetAllTopUps(pageInfo *common.PageInfo) (topups []*TopUp, total int64, err 
 		tx.Rollback()
 		return nil, 0, err
 	}
-
+	if err = enrichTopUpOrganizationNames(tx, topups); err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
 	if err = tx.Commit().Error; err != nil {
 		return nil, 0, err
 	}
@@ -412,7 +642,9 @@ func SearchUserTopUps(userId int, keyword string, pageInfo *common.PageInfo) (to
 		}
 	}()
 
-	query := tx.Model(&TopUp{}).Where("user_id = ? AND create_time >= ?", userId, topUpQueryCutoff())
+	query := tx.Model(&TopUp{}).
+		Where("user_id = ? AND create_time >= ?", userId, topUpQueryCutoff()).
+		Where("(top_up_target = ? OR top_up_target = '' OR top_up_target IS NULL)", TopUpTargetPersonal)
 	if keyword != "" {
 		pattern, perr := sanitizeLikePattern(keyword)
 		if perr != nil {
@@ -433,7 +665,6 @@ func SearchUserTopUps(userId int, keyword string, pageInfo *common.PageInfo) (to
 		common.SysError("failed to search topups: " + err.Error())
 		return nil, 0, errors.New("搜索充值记录失败")
 	}
-
 	if err = tx.Commit().Error; err != nil {
 		return nil, 0, err
 	}
@@ -473,6 +704,10 @@ func SearchAllTopUps(keyword string, pageInfo *common.PageInfo) (topups []*TopUp
 		common.SysError("failed to search topups: " + err.Error())
 		return nil, 0, errors.New("搜索充值记录失败")
 	}
+	if err = enrichTopUpOrganizationNames(tx, topups); err != nil {
+		tx.Rollback()
+		return nil, 0, err
+	}
 
 	if err = tx.Commit().Error; err != nil {
 		return nil, 0, err
@@ -480,8 +715,17 @@ func SearchAllTopUps(keyword string, pageInfo *common.PageInfo) (topups []*TopUp
 	return topups, total, nil
 }
 
-// ManualCompleteTopUp 管理员手动完成订单并给用户充值
+// ManualCompleteTopUp completes a persisted top-up using its immutable target.
 func ManualCompleteTopUp(tradeNo string, callerIp string) error {
+	return manualCompleteTopUp(tradeNo, callerIp, "")
+}
+
+// ManualCompleteOrganizationTopUp only completes organization-fund orders.
+func ManualCompleteOrganizationTopUp(tradeNo string, callerIp string) error {
+	return manualCompleteTopUp(tradeNo, callerIp, TopUpTargetOrganization)
+}
+
+func manualCompleteTopUp(tradeNo string, callerIp string, requiredTarget string) error {
 	if tradeNo == "" {
 		return errors.New("未提供订单号")
 	}
@@ -495,17 +739,28 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 	var quotaToAdd int
 	var payMoney float64
 	var paymentMethod string
-	var creditResult UserWalletCreditResult
+	var creditResult topUpCreditResult
+	alreadyDone := false
+	topUp := &TopUp{}
 
 	err := DB.Transaction(func(tx *gorm.DB) error {
-		topUp := &TopUp{}
 		// 行级锁，避免并发补单
 		if err := lockForUpdate(tx).Where(refCol+" = ?", tradeNo).First(topUp).Error; err != nil {
 			return errors.New("充值订单不存在")
 		}
+		if requiredTarget != "" {
+			target, err := NormalizeTopUpTarget(topUp.TopUpTarget)
+			if err != nil || target != requiredTarget {
+				return ErrInvalidTopUpTarget
+			}
+			if target == TopUpTargetOrganization && topUp.OrganizationId <= 0 {
+				return ErrOrganizationIdentityInvalid
+			}
+		}
 
 		// 幂等处理：已成功直接返回
 		if topUp.Status == common.TopUpStatusSuccess {
+			alreadyDone = true
 			return nil
 		}
 
@@ -553,9 +808,12 @@ func ManualCompleteTopUp(tradeNo string, callerIp string) error {
 	if err != nil {
 		return err
 	}
+	if alreadyDone {
+		return nil
+	}
 
 	// 事务外记录日志，避免阻塞
-	syncUserWalletCreditCache(userId, int64(quotaToAdd), creditResult, "manual topup")
+	syncTopUpCreditCache(topUp, int64(quotaToAdd), creditResult, "manual topup")
 	RecordTopupLog(userId, fmt.Sprintf("管理员补单成功，充值金额: %v，支付金额：%f", logger.FormatQuota(quotaToAdd), payMoney), callerIp, paymentMethod, "admin")
 	return nil
 }
@@ -565,7 +823,8 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 	}
 
 	var quota int
-	var creditResult UserWalletCreditResult
+	var creditResult topUpCreditResult
+	alreadyDone := false
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -583,6 +842,10 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 			return ErrPaymentMethodMismatch
 		}
 
+		if topUp.Status == common.TopUpStatusSuccess {
+			alreadyDone = true
+			return nil
+		}
 		if topUp.Status != common.TopUpStatusPending {
 			return errors.New("充值订单状态错误")
 		}
@@ -626,7 +889,10 @@ func RechargeCreem(referenceId string, customerEmail string, customerName string
 		common.SysError("creem topup failed: " + err.Error())
 		return errors.New("充值失败，请稍后重试")
 	}
-	syncUserWalletCreditCache(topUp.UserId, int64(quota), creditResult, "creem topup")
+	if alreadyDone {
+		return nil
+	}
+	syncTopUpCreditCache(topUp, int64(quota), creditResult, "creem topup")
 
 	RecordTopupLog(topUp.UserId, fmt.Sprintf("使用Creem充值成功，充值额度: %v，支付金额：%.2f", quota, topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodCreem)
 
@@ -639,7 +905,7 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 	}
 
 	var quotaToAdd int
-	var creditResult UserWalletCreditResult
+	var creditResult topUpCreditResult
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -686,7 +952,7 @@ func RechargeWaffo(tradeNo string, callerIp string) (err error) {
 		common.SysError("waffo topup failed: " + err.Error())
 		return errors.New("充值失败，请稍后重试")
 	}
-	syncUserWalletCreditCache(topUp.UserId, int64(quotaToAdd), creditResult, "waffo topup")
+	syncTopUpCreditCache(topUp, int64(quotaToAdd), creditResult, "waffo topup")
 
 	if quotaToAdd > 0 {
 		RecordTopupLog(topUp.UserId, fmt.Sprintf("Waffo充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money), callerIp, topUp.PaymentMethod, PaymentMethodWaffo)
@@ -701,7 +967,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 	}
 
 	var quotaToAdd int
-	var creditResult UserWalletCreditResult
+	var creditResult topUpCreditResult
 	topUp := &TopUp{}
 
 	refCol := "`trade_no`"
@@ -748,7 +1014,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 		common.SysError("waffo pancake topup failed: " + err.Error())
 		return errors.New("充值失败，请稍后重试")
 	}
-	syncUserWalletCreditCache(topUp.UserId, int64(quotaToAdd), creditResult, "waffo pancake topup")
+	syncTopUpCreditCache(topUp, int64(quotaToAdd), creditResult, "waffo pancake topup")
 
 	if quotaToAdd > 0 {
 		RecordLog(topUp.UserId, LogTypeTopup, fmt.Sprintf("Waffo Pancake充值成功，充值额度: %v，支付金额: %.2f", logger.FormatQuota(quotaToAdd), topUp.Money))

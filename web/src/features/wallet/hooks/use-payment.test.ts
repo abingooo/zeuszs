@@ -22,28 +22,62 @@ import { PAYMENT_TYPES } from '../constants'
 import { requestPaymentAmount } from './use-payment'
 
 describe('payment amount routing', () => {
-  test('uses the dedicated Waffo amount calculator', async () => {
-    const calls: string[] = []
-    const amount = await requestPaymentAmount(120, PAYMENT_TYPES.WAFFO, {
-      regular: async () => {
-        calls.push('regular')
-        return { success: true, data: '1' }
-      },
-      stripe: async () => {
-        calls.push('stripe')
-        return { success: true, data: '2' }
-      },
-      waffo: async (request) => {
-        calls.push(`waffo:${request.amount}`)
-        return { success: true, data: '18.75' }
-      },
-      waffoPancake: async () => {
-        calls.push('pancake')
-        return { success: true, data: '4' }
-      },
+  test.each([
+    [PAYMENT_TYPES.ALIPAY, 'regular'],
+    [PAYMENT_TYPES.STRIPE, 'stripe'],
+    [PAYMENT_TYPES.WAFFO, 'waffo'],
+    [PAYMENT_TYPES.WAFFO_PANCAKE, 'pancake'],
+  ])(
+    'uses the dedicated %s amount calculator',
+    async (paymentType, expected) => {
+      const calls: string[] = []
+      const result = await requestPaymentAmount(
+        120,
+        paymentType,
+        'organization',
+        {
+          regular: async (request) => {
+            calls.push(`regular:${request.topup_target}`)
+            return { success: true, data: '18.75' }
+          },
+          stripe: async (request) => {
+            calls.push(`stripe:${request.topup_target}`)
+            return { success: true, data: '18.75' }
+          },
+          waffo: async (request) => {
+            calls.push(`waffo:${request.topup_target}`)
+            return { success: true, data: '18.75' }
+          },
+          waffoPancake: async (request) => {
+            calls.push(`pancake:${request.topup_target}`)
+            return { success: true, data: '18.75' }
+          },
+        }
+      )
+
+      expect(result).toEqual({ status: 'success', amount: 18.75 })
+      expect(calls).toEqual([`${expected}:organization`])
+    }
+  )
+
+  test('returns a failed result for a business calculation error', async () => {
+    const failedCalculator = async () => ({
+      success: false,
+      message: 'invalid amount',
     })
 
-    expect(amount).toBe(18.75)
-    expect(calls).toEqual(['waffo:120'])
+    const result = await requestPaymentAmount(
+      20,
+      PAYMENT_TYPES.ALIPAY,
+      'personal',
+      {
+        regular: failedCalculator,
+        stripe: failedCalculator,
+        waffo: failedCalculator,
+        waffoPancake: failedCalculator,
+      }
+    )
+
+    expect(result).toEqual({ status: 'failed', permissionDenied: false })
   })
 })

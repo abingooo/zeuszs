@@ -322,6 +322,28 @@ export function useCommonLogsColumns(isAdmin: boolean): ColumnDef<UsageLog>[] {
   if (isAdmin) {
     columns.push(
       {
+        id: 'organization',
+        header: t('Organization'),
+        accessorFn: (row) => row.organization_name,
+        cell: ({ row }) => {
+          const log = row.original
+          if (!log.organization_id) return null
+
+          return (
+            <div className='flex max-w-[160px] flex-col gap-0.5'>
+              {log.organization_name && (
+                <span className='truncate font-medium'>
+                  {log.organization_name}
+                </span>
+              )}
+              <span className='text-muted-foreground font-mono text-xs'>
+                #{log.organization_id}
+              </span>
+            </div>
+          )
+        },
+      },
+      {
         id: 'channel',
         header: t('Channel'),
         accessorFn: (row) => row.channel,

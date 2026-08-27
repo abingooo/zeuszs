@@ -93,4 +93,26 @@ describe('organization sidebar authority', () => {
       ).toBe(true)
     }
   )
+
+  test('hides organization navigation from a default-organization member', () => {
+    useAuthStore.getState().auth.setUser({
+      id: 3,
+      username: 'default-member',
+      role: ROLE.USER,
+      organization_id: 1,
+      organization_role: 'member',
+      organization_status: 'active',
+      organization_is_default: true,
+    })
+
+    const { result } = renderHook(() => useSidebarView(), {
+      wrapper: queryWrapper(),
+    })
+
+    expect(
+      result.current.navGroups
+        .flatMap((group) => group.items)
+        .some((item) => 'url' in item && item.url === '/organization')
+    ).toBe(false)
+  })
 })

@@ -16,10 +16,23 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 
 import { OrganizationWorkspace } from '@/features/organizations/organization-workspace'
+import { useAuthStore } from '@/stores/auth-store'
 
 export const Route = createFileRoute('/_authenticated/organization/')({
+  beforeLoad: () => {
+    const user = useAuthStore.getState().auth.user
+    if (
+      user?.organization_is_default === true &&
+      user.organization_role === 'member'
+    ) {
+      throw redirect({
+        to: '/dashboard/$section',
+        params: { section: 'models' },
+      })
+    }
+  },
   component: OrganizationWorkspace,
 })

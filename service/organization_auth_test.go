@@ -80,9 +80,12 @@ func TestOrganizationActionMatrixDoesNotUsePlatformRoleAsTenantBypass(t *testing
 
 	assert.True(t, CanOrganizationAction(owner, OrganizationActionMemberAllocate))
 	assert.True(t, CanOrganizationAction(admin, OrganizationActionMemberAllocate))
+	assert.True(t, CanOrganizationAction(owner, OrganizationActionFundTopup))
+	assert.True(t, CanOrganizationAction(admin, OrganizationActionFundTopup))
 	assert.True(t, CanOrganizationAction(memberPlatformAdmin, OrganizationActionRead))
 	assert.False(t, CanOrganizationAction(memberPlatformAdmin, OrganizationActionMemberRead))
 	assert.False(t, CanOrganizationAction(memberPlatformAdmin, OrganizationActionBillingRead))
+	assert.False(t, CanOrganizationAction(memberPlatformAdmin, OrganizationActionFundTopup))
 }
 
 func TestResolveOrganizationPrincipalRejectsForgedOwnerRole(t *testing.T) {

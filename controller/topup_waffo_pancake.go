@@ -19,7 +19,8 @@ import (
 )
 
 type WaffoPancakePayRequest struct {
-	Amount int64 `json:"amount"`
+	Amount      int64  `json:"amount"`
+	TopUpTarget string `json:"topup_target,omitempty"`
 }
 
 func RequestWaffoPancakeAmount(c *gin.Context) {
@@ -34,7 +35,12 @@ func RequestWaffoPancakeAmount(c *gin.Context) {
 		return
 	}
 	id := c.GetInt("id")
-	if rejectInvalidTopUpQuota(c, id, req.Amount) {
+	target, err := resolveTopUpTarget(c, req.TopUpTarget)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	if rejectInvalidTopUpQuota(c, id, target, req.Amount) {
 		return
 	}
 
@@ -355,7 +361,12 @@ func RequestWaffoPancakePay(c *gin.Context) {
 		return
 	}
 	id := c.GetInt("id")
-	if rejectInvalidTopUpQuota(c, id, req.Amount) {
+	target, err := resolveTopUpTarget(c, req.TopUpTarget)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	if rejectInvalidTopUpQuota(c, id, target, req.Amount) {
 		return
 	}
 
@@ -385,6 +396,7 @@ func RequestWaffoPancakePay(c *gin.Context) {
 		TradeNo:         tradeNo,
 		PaymentMethod:   model.PaymentMethodWaffoPancake,
 		PaymentProvider: model.PaymentProviderWaffoPancake,
+		TopUpTarget:     target,
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}

@@ -56,6 +56,7 @@ const (
 	/* organization related keys */
 	ContextKeyOrganizationId   ContextKey = "organization_id"
 	ContextKeyOrganizationRole ContextKey = "organization_role"
+	ContextKeyTopUpTarget      ContextKey = "topup_target"
 
 	ContextKeyLocalCountTokens ContextKey = "local_count_tokens"
 

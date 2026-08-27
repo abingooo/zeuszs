@@ -588,6 +588,8 @@ func RelayTask(c *gin.Context) {
 		task.PrivateData.UpstreamTaskID = result.UpstreamTaskID
 		task.PrivateData.BillingSource = relayInfo.BillingSource
 		task.PrivateData.SubscriptionId = relayInfo.SubscriptionId
+		task.PrivateData.OrganizationSubscriptionMetered = relayInfo.OrganizationId > 0 &&
+			relayInfo.BillingSource == service.BillingSourceSubscription && relayInfo.SubscriptionId > 0
 		if billingSession, ok := relayInfo.Billing.(*service.BillingSession); ok {
 			task.PrivateData.OrganizationReservationId = billingSession.OrganizationReservationID()
 		}

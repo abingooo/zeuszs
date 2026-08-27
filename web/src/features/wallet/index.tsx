@@ -16,10 +16,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { SectionPageLayout } from '@/components/layout'
+import {
+  getTenantOrganizationSummary,
+  tenantOrganizationKeys,
+} from '@/features/organizations/tenant-api'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
 import { getSelf } from '@/lib/api'
@@ -53,10 +59,48 @@ import type {
   PresetAmount,
   CreemProduct,
   WaffoPayMethod,
+  TopUpTarget,
 } from './types'
 
 interface WalletProps {
   initialShowHistory?: boolean
+}
+
+interface TopUpTargetSnapshot {
+  target: TopUpTarget
+  organizationId?: number
+  organizationName?: string
+}
+
+interface PaymentSnapshot extends TopUpTargetSnapshot {
+  topupAmount: number
+  paymentAmount: number
+  paymentMethod: PaymentMethod
+  waffoMethodIndex: number | null
+}
+
+interface CreemPaymentSnapshot extends TopUpTargetSnapshot {
+  product: CreemProduct
+}
+
+interface TopUpTargetContext {
+  target: TopUpTarget
+  canTopUpOrganization: boolean
+  organizationId?: number
+}
+
+function isTopUpTargetSnapshotAuthorized(
+  snapshot: TopUpTargetSnapshot,
+  context: TopUpTargetContext
+): boolean {
+  if (snapshot.target !== context.target) return false
+  if (snapshot.target === 'personal') return true
+
+  return (
+    context.canTopUpOrganization &&
+    snapshot.organizationId !== undefined &&
+    snapshot.organizationId === context.organizationId
+  )
 }
 
 export function Wallet(props: WalletProps) {
@@ -67,22 +111,55 @@ export function Wallet(props: WalletProps) {
   const [selectedPreset, setSelectedPreset] = useState<number | null>(null)
   const [selectedPaymentMethod, setSelectedPaymentMethod] =
     useState<PaymentMethod>()
-  const [selectedWaffoMethodIndex, setSelectedWaffoMethodIndex] = useState<
-    number | null
-  >(null)
   const [paymentLoading, setPaymentLoading] = useState<string | null>(null)
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false)
   const [transferDialogOpen, setTransferDialogOpen] = useState(false)
   const [billingDialogOpen, setBillingDialogOpen] = useState(false)
   const [redemptionCode, setRedemptionCode] = useState('')
   const [creemDialogOpen, setCreemDialogOpen] = useState(false)
-  const [selectedCreemProduct, setSelectedCreemProduct] =
-    useState<CreemProduct | null>(null)
   const [showSubscriptionPanel, setShowSubscriptionPanel] = useState(true)
+  const [topUpTarget, setTopUpTarget] = useState<TopUpTarget>('personal')
+  const [paymentSnapshot, setPaymentSnapshot] =
+    useState<PaymentSnapshot | null>(null)
+  const [creemPaymentSnapshot, setCreemPaymentSnapshot] =
+    useState<CreemPaymentSnapshot | null>(null)
 
   const { status } = useStatus()
   const { currency } = useSystemConfig()
-  const { topupInfo, presetAmounts, loading: topupLoading } = useTopupInfo()
+  const queryClient = useQueryClient()
+  const {
+    topupInfo,
+    presetAmounts,
+    loading: topupLoading,
+    refetch: refetchTopupInfo,
+  } = useTopupInfo()
+  const organizationTopUpId =
+    topupInfo?.topup_targets?.organization?.organization_id
+  const organizationSummaryQuery = useQuery({
+    queryKey: [...tenantOrganizationKeys.summary(), organizationTopUpId],
+    queryFn: getTenantOrganizationSummary,
+    enabled:
+      topupInfo?.topup_targets?.organization?.enabled === true &&
+      (organizationTopUpId ?? 0) > 0,
+  })
+  const organizationSummary =
+    organizationSummaryQuery.data?.organization_id === organizationTopUpId
+      ? organizationSummaryQuery.data
+      : undefined
+  const canTopUpOrganization =
+    topupInfo?.topup_targets?.organization?.enabled === true &&
+    (organizationSummary?.current_user_role === 'owner' ||
+      organizationSummary?.current_user_role === 'admin')
+  const topUpTargetContextRef = useRef<TopUpTargetContext>({
+    target: topUpTarget,
+    canTopUpOrganization,
+    organizationId: organizationTopUpId,
+  })
+  topUpTargetContextRef.current = {
+    target: topUpTarget,
+    canTopUpOrganization,
+    organizationId: organizationTopUpId,
+  }
 
   // Calculate effective exchange rate - when display type is USD, use rate of 1
   const effectiveUsdExchangeRate = useMemo(() => {
@@ -146,9 +223,78 @@ export function Wallet(props: WalletProps) {
 
       // Calculate initial payment amount with default payment type
       const defaultPaymentType = getDefaultPaymentType(topupInfo)
-      calculatePaymentAmount(minTopup, defaultPaymentType)
+      calculatePaymentAmount(minTopup, defaultPaymentType, topUpTarget)
     }
-  }, [topupInfo, calculatePaymentAmount])
+  }, [topupInfo, calculatePaymentAmount, topUpTarget])
+
+  const clearPendingPayments = useCallback(() => {
+    setSelectedPaymentMethod(undefined)
+    setPaymentSnapshot(null)
+    setCreemPaymentSnapshot(null)
+    setConfirmDialogOpen(false)
+    setCreemDialogOpen(false)
+  }, [])
+
+  useEffect(() => {
+    if (topUpTarget === 'organization' && !canTopUpOrganization) {
+      const hadPendingPayment =
+        paymentSnapshot?.target === 'organization' ||
+        creemPaymentSnapshot?.target === 'organization'
+
+      setTopUpTarget('personal')
+      clearPendingPayments()
+
+      if (hadPendingPayment) {
+        toast.warning(
+          t(
+            'Organization recharge permission is no longer available. The pending payment was cancelled.'
+          )
+        )
+      }
+    }
+  }, [
+    canTopUpOrganization,
+    clearPendingPayments,
+    creemPaymentSnapshot?.target,
+    paymentSnapshot?.target,
+    t,
+    topUpTarget,
+  ])
+
+  const captureTopUpTarget = useCallback((): TopUpTargetSnapshot | null => {
+    if (topUpTarget === 'personal') {
+      return { target: 'personal' }
+    }
+
+    if (!canTopUpOrganization || !organizationTopUpId) return null
+
+    return {
+      target: 'organization',
+      organizationId: organizationTopUpId,
+      organizationName: organizationSummary?.name,
+    }
+  }, [
+    canTopUpOrganization,
+    organizationSummary?.name,
+    organizationTopUpId,
+    topUpTarget,
+  ])
+
+  const warnAndClearUnauthorizedPayment = useCallback(async () => {
+    clearPendingPayments()
+    setTopUpTarget('personal')
+    toast.warning(
+      t(
+        'Organization recharge permission is no longer available. The pending payment was cancelled.'
+      )
+    )
+    await Promise.allSettled([
+      refetchTopupInfo(),
+      queryClient.invalidateQueries({
+        queryKey: tenantOrganizationKeys.summary(),
+      }),
+    ])
+  }, [clearPendingPayments, queryClient, refetchTopupInfo, t])
 
   // Get current payment type (selected or default)
   const getCurrentPaymentType = useCallback(() => {
@@ -159,20 +305,22 @@ export function Wallet(props: WalletProps) {
   const handleSelectPreset = (preset: PresetAmount) => {
     setTopupAmount(preset.value)
     setSelectedPreset(preset.value)
-    calculatePaymentAmount(preset.value, getCurrentPaymentType())
+    calculatePaymentAmount(preset.value, getCurrentPaymentType(), topUpTarget)
   }
 
   // Handle topup amount change
   const handleTopupAmountChange = (amount: number) => {
     setTopupAmount(amount)
     setSelectedPreset(null)
-    calculatePaymentAmount(amount, getCurrentPaymentType())
+    calculatePaymentAmount(amount, getCurrentPaymentType(), topUpTarget)
   }
 
   // Handle payment method selection
   const handlePaymentMethodSelect = async (method: PaymentMethod) => {
+    const targetSnapshot = captureTopUpTarget()
+    if (!targetSnapshot) return
+
     setSelectedPaymentMethod(method)
-    setSelectedWaffoMethodIndex(null)
     setPaymentLoading(method.type)
 
     try {
@@ -183,7 +331,39 @@ export function Wallet(props: WalletProps) {
       }
 
       // Calculate payment amount and show confirmation dialog
-      await calculatePaymentAmount(topupAmount, method.type)
+      const calculation = await calculatePaymentAmount(
+        topupAmount,
+        method.type,
+        targetSnapshot.target
+      )
+      if (calculation.status !== 'success') {
+        if (
+          calculation.status === 'failed' &&
+          calculation.permissionDenied &&
+          targetSnapshot.target === 'organization'
+        ) {
+          await warnAndClearUnauthorizedPayment()
+        }
+        return
+      }
+      if (
+        !isTopUpTargetSnapshotAuthorized(
+          targetSnapshot,
+          topUpTargetContextRef.current
+        )
+      ) {
+        if (targetSnapshot.target === 'organization') {
+          await warnAndClearUnauthorizedPayment()
+        }
+        return
+      }
+      setPaymentSnapshot({
+        ...targetSnapshot,
+        topupAmount,
+        paymentAmount: calculation.amount,
+        paymentMethod: { ...method },
+        waffoMethodIndex: null,
+      })
       setConfirmDialogOpen(true)
     } finally {
       setPaymentLoading(null)
@@ -192,21 +372,37 @@ export function Wallet(props: WalletProps) {
 
   // Handle payment confirmation
   const handlePaymentConfirm = async () => {
-    if (!selectedPaymentMethod) return
+    if (!paymentSnapshot) return
+
+    if (
+      !isTopUpTargetSnapshotAuthorized(
+        paymentSnapshot,
+        topUpTargetContextRef.current
+      )
+    ) {
+      if (paymentSnapshot.target === 'organization') {
+        await warnAndClearUnauthorizedPayment()
+      }
+      return
+    }
 
     const success = await dispatchSelectedPayment(
-      selectedPaymentMethod,
-      topupAmount,
-      selectedWaffoMethodIndex,
+      paymentSnapshot.paymentMethod,
+      paymentSnapshot.topupAmount,
+      paymentSnapshot.waffoMethodIndex,
       {
-        regular: processPayment,
-        waffo: processWaffoPayment,
-        waffoPancake: processWaffoPancakePayment,
+        regular: (amount, paymentType) =>
+          processPayment(amount, paymentType, paymentSnapshot.target),
+        waffo: (amount, methodIndex) =>
+          processWaffoPayment(amount, methodIndex, paymentSnapshot.target),
+        waffoPancake: (amount) =>
+          processWaffoPancakePayment(amount, paymentSnapshot.target),
       }
     )
 
     if (success) {
       setConfirmDialogOpen(false)
+      setPaymentSnapshot(null)
       await fetchUser()
     }
   }
@@ -233,18 +429,37 @@ export function Wallet(props: WalletProps) {
 
   // Handle Creem product selection
   const handleCreemProductSelect = (product: CreemProduct) => {
-    setSelectedCreemProduct(product)
+    const targetSnapshot = captureTopUpTarget()
+    if (!targetSnapshot) return
+
+    const productSnapshot = { ...product }
+    setCreemPaymentSnapshot({ ...targetSnapshot, product: productSnapshot })
     setCreemDialogOpen(true)
   }
 
   // Handle Creem payment confirmation
   const handleCreemConfirm = async () => {
-    if (!selectedCreemProduct) return
+    if (!creemPaymentSnapshot) return
 
-    const success = await processCreemPayment(selectedCreemProduct.productId)
+    if (
+      !isTopUpTargetSnapshotAuthorized(
+        creemPaymentSnapshot,
+        topUpTargetContextRef.current
+      )
+    ) {
+      if (creemPaymentSnapshot.target === 'organization') {
+        await warnAndClearUnauthorizedPayment()
+      }
+      return
+    }
+
+    const success = await processCreemPayment(
+      creemPaymentSnapshot.product.productId,
+      creemPaymentSnapshot.target
+    )
     if (success) {
       setCreemDialogOpen(false)
-      setSelectedCreemProduct(null)
+      setCreemPaymentSnapshot(null)
       await fetchUser()
     }
   }
@@ -253,17 +468,52 @@ export function Wallet(props: WalletProps) {
     method: WaffoPayMethod,
     index: number
   ) => {
+    const targetSnapshot = captureTopUpTarget()
+    if (!targetSnapshot) return
+
     const loadingKey = `waffo-${index}`
-    setSelectedPaymentMethod({
+    const paymentMethod: PaymentMethod = {
       name: method.name,
       type: PAYMENT_TYPES.WAFFO,
       icon: method.icon,
-    })
-    setSelectedWaffoMethodIndex(index)
+    }
+    setSelectedPaymentMethod(paymentMethod)
     setPaymentLoading(loadingKey)
 
     try {
-      await calculatePaymentAmount(topupAmount, PAYMENT_TYPES.WAFFO)
+      const calculation = await calculatePaymentAmount(
+        topupAmount,
+        PAYMENT_TYPES.WAFFO,
+        targetSnapshot.target
+      )
+      if (calculation.status !== 'success') {
+        if (
+          calculation.status === 'failed' &&
+          calculation.permissionDenied &&
+          targetSnapshot.target === 'organization'
+        ) {
+          await warnAndClearUnauthorizedPayment()
+        }
+        return
+      }
+      if (
+        !isTopUpTargetSnapshotAuthorized(
+          targetSnapshot,
+          topUpTargetContextRef.current
+        )
+      ) {
+        if (targetSnapshot.target === 'organization') {
+          await warnAndClearUnauthorizedPayment()
+        }
+        return
+      }
+      setPaymentSnapshot({
+        ...targetSnapshot,
+        topupAmount,
+        paymentAmount: calculation.amount,
+        paymentMethod,
+        waffoMethodIndex: index,
+      })
       setConfirmDialogOpen(true)
     } finally {
       setPaymentLoading(null)
@@ -271,15 +521,34 @@ export function Wallet(props: WalletProps) {
   }
 
   // Get discount rate for current topup amount
-  const getDiscountRate = useCallback(() => {
-    return topupInfo?.discount?.[topupAmount] || DEFAULT_DISCOUNT_RATE
-  }, [topupInfo, topupAmount])
+  const getDiscountRate = useCallback(
+    (amount: number) => {
+      return topupInfo?.discount?.[amount] || DEFAULT_DISCOUNT_RATE
+    },
+    [topupInfo]
+  )
 
   const handleSubscriptionAvailabilityChange = useCallback(
     (available: boolean) => {
       setShowSubscriptionPanel(available)
     },
     []
+  )
+
+  const handleTopUpTargetChange = useCallback(
+    (target: TopUpTarget) => {
+      if (target === 'organization' && !canTopUpOrganization) return
+      setTopUpTarget(target)
+      clearPendingPayments()
+      calculatePaymentAmount(topupAmount, getCurrentPaymentType(), target)
+    },
+    [
+      calculatePaymentAmount,
+      canTopUpOrganization,
+      clearPendingPayments,
+      getCurrentPaymentType,
+      topupAmount,
+    ]
   )
 
   return (
@@ -328,6 +597,16 @@ export function Wallet(props: WalletProps) {
                   enableWaffoPancakeTopup={
                     topupInfo?.enable_waffo_pancake_topup
                   }
+                  topUpTarget={topUpTarget}
+                  onTopUpTargetChange={handleTopUpTargetChange}
+                  organizationTarget={
+                    canTopUpOrganization && organizationSummary
+                      ? {
+                          name: organizationSummary.name,
+                          quota: organizationSummary.fund_quota,
+                        }
+                      : undefined
+                  }
                 />
               </div>
 
@@ -354,15 +633,19 @@ export function Wallet(props: WalletProps) {
 
       <PaymentConfirmDialog
         open={confirmDialogOpen}
-        onOpenChange={setConfirmDialogOpen}
+        onOpenChange={(open) => {
+          setConfirmDialogOpen(open)
+          if (!open) setPaymentSnapshot(null)
+        }}
         onConfirm={handlePaymentConfirm}
-        topupAmount={topupAmount}
-        paymentAmount={paymentAmount}
-        paymentMethod={selectedPaymentMethod}
-        calculating={calculating}
+        topupAmount={paymentSnapshot?.topupAmount ?? 0}
+        paymentAmount={paymentSnapshot?.paymentAmount ?? 0}
+        paymentMethod={paymentSnapshot?.paymentMethod}
         processing={processing || waffoProcessing || pancakeProcessing}
-        discountRate={getDiscountRate()}
+        discountRate={getDiscountRate(paymentSnapshot?.topupAmount ?? 0)}
         usdExchangeRate={effectiveUsdExchangeRate}
+        topUpTarget={paymentSnapshot?.target ?? 'personal'}
+        organizationName={paymentSnapshot?.organizationName}
       />
 
       <TransferDialog
@@ -376,14 +659,23 @@ export function Wallet(props: WalletProps) {
       <BillingHistoryDialog
         open={billingDialogOpen}
         onOpenChange={setBillingDialogOpen}
+        target={topUpTarget}
+        organizationName={organizationSummary?.name}
       />
 
       <CreemConfirmDialog
         open={creemDialogOpen}
-        onOpenChange={setCreemDialogOpen}
+        onOpenChange={(open) => {
+          setCreemDialogOpen(open)
+          if (!open) {
+            setCreemPaymentSnapshot(null)
+          }
+        }}
         onConfirm={handleCreemConfirm}
-        product={selectedCreemProduct}
+        product={creemPaymentSnapshot?.product ?? null}
         processing={creemProcessing}
+        topUpTarget={creemPaymentSnapshot?.target ?? 'personal'}
+        organizationName={creemPaymentSnapshot?.organizationName}
       />
     </>
   )

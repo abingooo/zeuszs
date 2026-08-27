@@ -55,6 +55,7 @@ export interface AuthUser {
   organization_id?: number
   organization_role?: 'owner' | 'admin' | 'member'
   organization_status?: 'active' | 'disabled'
+  organization_is_default?: boolean
   permissions?: UserPermissions
 }
 

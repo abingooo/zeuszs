@@ -29,7 +29,7 @@ import {
   completeOrder,
   isApiSuccess,
 } from '../api'
-import type { TopupRecord } from '../types'
+import type { TopupRecord, TopUpTarget } from '../types'
 
 // ============================================================================
 // Billing History Hook
@@ -40,10 +40,11 @@ interface UseBillingHistoryOptions {
   initialPage?: number
   /** Initial page size */
   initialPageSize?: number
+  target?: TopUpTarget
 }
 
 export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
-  const { initialPage = 1, initialPageSize = 10 } = options
+  const { initialPage = 1, initialPageSize = 10, target = 'personal' } = options
   const isAdmin = useIsAdmin()
 
   const [records, setRecords] = useState<TopupRecord[]>([])
@@ -63,9 +64,24 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
     const requestId = ++requestIdRef.current
     setLoading(true)
     try {
-      const response = isAdmin
-        ? await getAllBillingHistory(page, pageSize, debouncedKeyword)
-        : await getUserBillingHistory(page, pageSize, debouncedKeyword)
+      let response
+      if (target === 'organization') {
+        response = await getUserBillingHistory(
+          page,
+          pageSize,
+          debouncedKeyword,
+          target
+        )
+      } else if (isAdmin) {
+        response = await getAllBillingHistory(page, pageSize, debouncedKeyword)
+      } else {
+        response = await getUserBillingHistory(
+          page,
+          pageSize,
+          debouncedKeyword,
+          target
+        )
+      }
 
       if (requestId !== requestIdRef.current) return
 
@@ -92,21 +108,30 @@ export function useBillingHistory(options: UseBillingHistoryOptions = {}) {
         setLoading(false)
       }
     }
-  }, [debouncedKeyword, isAdmin, page, pageSize])
+  }, [debouncedKeyword, isAdmin, page, pageSize, target])
 
   /**
    * Complete a pending order (admin only)
    */
   const handleCompleteOrder = useCallback(
-    async (tradeNo: string) => {
+    async (record: TopupRecord) => {
       if (!isAdmin) {
         toast.error(i18next.t('Admin access required'))
+        return false
+      }
+      if (
+        record.topup_target !== 'personal' &&
+        record.topup_target !== 'organization'
+      ) {
         return false
       }
 
       setCompleting(true)
       try {
-        const response = await completeOrder({ trade_no: tradeNo })
+        const response = await completeOrder({
+          trade_no: record.trade_no,
+          topup_target: record.topup_target,
+        })
         if (isApiSuccess(response)) {
           toast.success(i18next.t('Order completed successfully'))
           // Refresh the list

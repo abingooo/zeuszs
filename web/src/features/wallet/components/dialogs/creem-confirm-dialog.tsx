@@ -24,7 +24,7 @@ import { Button } from '@/components/ui/button'
 import { formatNumber } from '@/lib/format'
 
 import { formatCreemPrice } from '../../lib/format'
-import type { CreemProduct } from '../../types'
+import type { CreemProduct, TopUpTarget } from '../../types'
 
 interface CreemConfirmDialogProps {
   open: boolean
@@ -32,6 +32,8 @@ interface CreemConfirmDialogProps {
   onConfirm: () => void
   product: CreemProduct | null
   processing: boolean
+  topUpTarget: TopUpTarget
+  organizationName?: string
 }
 
 export function CreemConfirmDialog({
@@ -40,6 +42,8 @@ export function CreemConfirmDialog({
   onConfirm,
   product,
   processing,
+  topUpTarget,
+  organizationName,
 }: CreemConfirmDialogProps) {
   const { t } = useTranslation()
 
@@ -72,6 +76,16 @@ export function CreemConfirmDialog({
       }
     >
       <div className='space-y-3 py-3 sm:space-y-4 sm:py-4'>
+        <div className='flex items-center justify-between gap-4'>
+          <span className='text-muted-foreground'>
+            {t('Recharge destination')}
+          </span>
+          <span className='min-w-0 truncate font-medium'>
+            {topUpTarget === 'organization'
+              ? `${t('Organization wallet')} · ${organizationName ?? ''}`
+              : t('Personal wallet')}
+          </span>
+        </div>
         <div className='flex items-center justify-between'>
           <span className='text-muted-foreground'>{t('Product')}</span>
           <span className='font-medium'>{product.name}</span>

@@ -79,6 +79,25 @@ func RequireOrganizationAction(action service.OrganizationAction) func(c *gin.Co
 	}
 }
 
+// OrganizationFundTopUpTarget marks a payment request as an organization
+// fund purchase. It is only used after active-organization authentication and
+// the explicit fund.topup permission check on tenant routes.
+func OrganizationFundTopUpTarget() func(c *gin.Context) {
+	return func(c *gin.Context) {
+		principal, ok := GetOrganizationPrincipal(c)
+		if !ok || !service.CanOrganizationAction(principal, service.OrganizationActionFundTopup) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"success": false,
+				"code":    "ORGANIZATION_ACTION_FORBIDDEN",
+				"message": common.TranslateMessage(c, i18n.MsgAuthInsufficientPrivilege),
+			})
+			return
+		}
+		common.SetContextKey(c, constant.ContextKeyTopUpTarget, model.TopUpTargetOrganization)
+		c.Next()
+	}
+}
+
 // RequireOrganizationWalletTopup re-checks the current organization policy
 // immediately before amount estimation or payment-order creation. Only
 // ordinary Members are blocked by the policy; Owner/Admin behavior is decided

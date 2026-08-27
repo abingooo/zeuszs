@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
@@ -29,7 +31,16 @@ func GetTopUpInfo(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	onlineTopupAllowed := complianceConfirmed && organizationPolicy.Allowed
+	personalTopupAllowed := complianceConfirmed && organizationPolicy.Allowed
+	organizationTopupAllowed := complianceConfirmed &&
+		(organizationPolicy.OrganizationRole == model.OrganizationRoleOwner ||
+			organizationPolicy.OrganizationRole == model.OrganizationRoleAdmin)
+	onlineTopupAllowed := personalTopupAllowed || organizationTopupAllowed
+	defaultTopUpTarget := model.TopUpTargetPersonal
+	if common.GetContextKeyString(c, constant.ContextKeyTopUpTarget) == model.TopUpTargetOrganization {
+		defaultTopUpTarget = model.TopUpTargetOrganization
+		onlineTopupAllowed = organizationTopupAllowed
+	}
 
 	// 获取支付方式
 	payMethods := make([]map[string]string, 0, len(operation_setting.PayMethods)+3)
@@ -134,6 +145,17 @@ func GetTopUpInfo(c *gin.Context) {
 		"discount":                  operation_setting.GetPaymentSetting().AmountDiscount,
 		"topup_link":                topupLink,
 		"organization_topup_policy": organizationPolicy,
+		"default_topup_target":      defaultTopUpTarget,
+		"topup_targets": gin.H{
+			model.TopUpTargetPersonal: gin.H{
+				"enabled": personalTopupAllowed,
+			},
+			model.TopUpTargetOrganization: gin.H{
+				"enabled":         organizationTopupAllowed,
+				"organization_id": organizationPolicy.OrganizationID,
+			},
+		},
+		"organization_fund_topup_enabled": organizationTopupAllowed,
 	}
 	common.ApiSuccess(c, data)
 }
@@ -141,10 +163,12 @@ func GetTopUpInfo(c *gin.Context) {
 type EpayRequest struct {
 	Amount        int64  `json:"amount"`
 	PaymentMethod string `json:"payment_method"`
+	TopUpTarget   string `json:"topup_target,omitempty"`
 }
 
 type AmountRequest struct {
-	Amount int64 `json:"amount"`
+	Amount      int64  `json:"amount"`
+	TopUpTarget string `json:"topup_target,omitempty"`
 }
 
 func GetEpayClient() *epay.Client {
@@ -253,10 +277,28 @@ func validateTopUpQuota(amount int64) (int, error) {
 	return 0, errors.New("充值数量无效")
 }
 
-func rejectInvalidCreditedQuota(c *gin.Context, userId int, quota decimal.Decimal) bool {
+func resolveTopUpTarget(c *gin.Context, requested string) (string, error) {
+	forced := common.GetContextKeyString(c, constant.ContextKeyTopUpTarget)
+	if forced == model.TopUpTargetOrganization {
+		if strings.TrimSpace(requested) != "" && strings.TrimSpace(requested) != forced {
+			return "", model.ErrInvalidTopUpTarget
+		}
+		return forced, nil
+	}
+	return model.NormalizeTopUpTarget(requested)
+}
+
+func validateTopUpTargetCapacity(userId int, target string, creditedQuota int) error {
+	if target == model.TopUpTargetOrganization {
+		return model.ValidateOrganizationFundTopUpCapacity(userId, creditedQuota)
+	}
+	return model.ValidateTopUpQuotaCapacity(userId, creditedQuota)
+}
+
+func rejectInvalidCreditedQuota(c *gin.Context, userId int, target string, quota decimal.Decimal) bool {
 	creditedQuota, err := validateCreditedQuota(quota)
 	if err == nil {
-		err = model.ValidateTopUpQuotaCapacity(userId, creditedQuota)
+		err = validateTopUpTargetCapacity(userId, target, creditedQuota)
 	}
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
@@ -265,10 +307,10 @@ func rejectInvalidCreditedQuota(c *gin.Context, userId int, quota decimal.Decima
 	return false
 }
 
-func rejectInvalidTopUpQuota(c *gin.Context, userId int, amount int64) bool {
+func rejectInvalidTopUpQuota(c *gin.Context, userId int, target string, amount int64) bool {
 	creditedQuota, err := validateTopUpQuota(amount)
 	if err == nil {
-		err = model.ValidateTopUpQuotaCapacity(userId, creditedQuota)
+		err = validateTopUpTargetCapacity(userId, target, creditedQuota)
 	}
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
@@ -289,7 +331,12 @@ func RequestEpay(c *gin.Context) {
 		return
 	}
 	id := c.GetInt("id")
-	if rejectInvalidTopUpQuota(c, id, req.Amount) {
+	target, err := resolveTopUpTarget(c, req.TopUpTarget)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	if rejectInvalidTopUpQuota(c, id, target, req.Amount) {
 		return
 	}
 
@@ -346,6 +393,7 @@ func RequestEpay(c *gin.Context) {
 		TradeNo:         tradeNo,
 		PaymentMethod:   req.PaymentMethod,
 		PaymentProvider: model.PaymentProviderEpay,
+		TopUpTarget:     target,
 		CreateTime:      time.Now().Unix(),
 		Status:          common.TopUpStatusPending,
 	}
@@ -506,7 +554,12 @@ func RequestAmount(c *gin.Context) {
 		return
 	}
 	id := c.GetInt("id")
-	if rejectInvalidTopUpQuota(c, id, req.Amount) {
+	target, err := resolveTopUpTarget(c, req.TopUpTarget)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "error", "data": err.Error()})
+		return
+	}
+	if rejectInvalidTopUpQuota(c, id, target, req.Amount) {
 		return
 	}
 	group, err := model.GetUserGroup(id, true)
@@ -532,7 +585,10 @@ func GetUserTopUps(c *gin.Context) {
 		total  int64
 		err    error
 	)
-	if keyword != "" {
+	if common.GetContextKeyString(c, constant.ContextKeyTopUpTarget) == model.TopUpTargetOrganization {
+		organizationID := common.GetContextKeyInt(c, constant.ContextKeyOrganizationId)
+		topups, total, err = model.GetOrganizationTopUps(organizationID, keyword, pageInfo)
+	} else if keyword != "" {
 		topups, total, err = model.SearchUserTopUps(userId, keyword, pageInfo)
 	} else {
 		topups, total, err = model.GetUserTopUps(userId, pageInfo)
@@ -576,8 +632,17 @@ type AdminCompleteTopupRequest struct {
 	TradeNo string `json:"trade_no"`
 }
 
-// AdminCompleteTopUp 管理员补单接口
+// AdminCompleteTopUp completes an order using its persisted target.
 func AdminCompleteTopUp(c *gin.Context) {
+	adminCompleteTopUp(c, false)
+}
+
+// AdminCompleteOrganizationTopUp only accepts organization-fund orders.
+func AdminCompleteOrganizationTopUp(c *gin.Context) {
+	adminCompleteTopUp(c, true)
+}
+
+func adminCompleteTopUp(c *gin.Context, organizationOnly bool) {
 	var req AdminCompleteTopupRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.TradeNo == "" {
 		common.ApiErrorMsg(c, "参数错误")
@@ -588,7 +653,13 @@ func AdminCompleteTopUp(c *gin.Context) {
 	LockOrder(req.TradeNo)
 	defer UnlockOrder(req.TradeNo)
 
-	if err := model.ManualCompleteTopUp(req.TradeNo, c.ClientIP()); err != nil {
+	var err error
+	if organizationOnly {
+		err = model.ManualCompleteOrganizationTopUp(req.TradeNo, c.ClientIP())
+	} else {
+		err = model.ManualCompleteTopUp(req.TradeNo, c.ClientIP())
+	}
+	if err != nil {
 		common.ApiError(c, err)
 		return
 	}

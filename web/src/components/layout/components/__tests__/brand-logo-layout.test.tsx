@@ -39,13 +39,69 @@ vi.mock('@/hooks/use-system-config', () => ({
 }))
 
 describe('brand logo layout', () => {
-  test('keeps a wide deployment logo fully visible in the app brand', () => {
+  test('keeps the deployment logo visible and the main brand independently prominent', () => {
     render(<SystemBrand variant='inline' />)
 
     expect(screen.getByRole('img', { name: 'Logo' })).toHaveClass(
       'object-contain'
     )
+    expect(screen.getByText('Deployment')).toHaveAttribute(
+      'data-slot',
+      'system-brand-name'
+    )
+    expect(screen.getByText('Deployment')).toHaveClass(
+      'shrink-0',
+      'text-lg',
+      'font-semibold'
+    )
   })
+
+  test('shows a truncating organization suffix after the main brand for a non-default organization', () => {
+    render(
+      <SystemBrand
+        variant='inline'
+        organization={{
+          name: 'Example Organization With A Very Long Display Name',
+          is_default: false,
+        }}
+      />
+    )
+
+    const organization = screen.getByText(
+      'for Example Organization With A Very Long Display Name'
+    )
+    expect(organization).toHaveAttribute(
+      'data-slot',
+      'system-brand-organization'
+    )
+    expect(organization).toHaveClass('min-w-0', 'truncate', 'text-xs')
+    expect(organization).toHaveAttribute(
+      'title',
+      'for Example Organization With A Very Long Display Name'
+    )
+  })
+
+  test.each([
+    ['default', true],
+    ['unclassified', undefined],
+  ])(
+    'hides the organization suffix for a %s organization',
+    (_label, isDefault) => {
+      render(
+        <SystemBrand
+          variant='inline'
+          organization={{
+            name: 'Default Organization',
+            is_default: isDefault,
+          }}
+        />
+      )
+
+      expect(
+        screen.queryByText('for Default Organization')
+      ).not.toBeInTheDocument()
+    }
+  )
 
   test('keeps a wide deployment logo fully visible in the public header', () => {
     render(<HeaderLogo src='/wide-logo.png' loading={false} logoLoaded />)

@@ -488,35 +488,47 @@ func buildSelfUserData(user *model.User) map[string]interface{} {
 	userSetting := user.GetSetting()
 	permissions := calculateUserPermissions(user.Role)
 	permissions["admin_permissions"] = authz.Capabilities(user.Id, user.Role)
+	organizationIsDefault := false
+	if user.OrganizationId > 0 && model.DB != nil {
+		var count int64
+		if err := model.DB.Model(&model.Organization{}).
+			Where("id = ? AND system_key = ?", user.OrganizationId, model.DefaultOrganizationSystemKey).
+			Count(&count).Error; err != nil {
+			common.SysError("failed to resolve default organization identity: " + err.Error())
+		} else {
+			organizationIsDefault = count > 0
+		}
+	}
 	return map[string]interface{}{
-		"id":                  user.Id,
-		"username":            user.Username,
-		"display_name":        user.DisplayName,
-		"role":                user.Role,
-		"status":              user.Status,
-		"organization_id":     user.OrganizationId,
-		"organization_role":   user.OrganizationRole,
-		"organization_status": user.OrganizationStatus,
-		"email":               user.Email,
-		"github_id":           user.GitHubId,
-		"discord_id":          user.DiscordId,
-		"oidc_id":             user.OidcId,
-		"wechat_id":           user.WeChatId,
-		"telegram_id":         user.TelegramId,
-		"group":               user.Group,
-		"quota":               user.Quota,
-		"used_quota":          user.UsedQuota,
-		"request_count":       user.RequestCount,
-		"aff_code":            user.AffCode,
-		"aff_count":           user.AffCount,
-		"aff_quota":           user.AffQuota,
-		"aff_history_quota":   user.AffHistoryQuota,
-		"inviter_id":          user.InviterId,
-		"linux_do_id":         user.LinuxDOId,
-		"setting":             user.Setting,
-		"stripe_customer":     user.StripeCustomer,
-		"sidebar_modules":     userSetting.SidebarModules, // 正确提取sidebar_modules字段
-		"permissions":         permissions,
+		"id":                      user.Id,
+		"username":                user.Username,
+		"display_name":            user.DisplayName,
+		"role":                    user.Role,
+		"status":                  user.Status,
+		"organization_id":         user.OrganizationId,
+		"organization_role":       user.OrganizationRole,
+		"organization_status":     user.OrganizationStatus,
+		"organization_is_default": organizationIsDefault,
+		"email":                   user.Email,
+		"github_id":               user.GitHubId,
+		"discord_id":              user.DiscordId,
+		"oidc_id":                 user.OidcId,
+		"wechat_id":               user.WeChatId,
+		"telegram_id":             user.TelegramId,
+		"group":                   user.Group,
+		"quota":                   user.Quota,
+		"used_quota":              user.UsedQuota,
+		"request_count":           user.RequestCount,
+		"aff_code":                user.AffCode,
+		"aff_count":               user.AffCount,
+		"aff_quota":               user.AffQuota,
+		"aff_history_quota":       user.AffHistoryQuota,
+		"inviter_id":              user.InviterId,
+		"linux_do_id":             user.LinuxDOId,
+		"setting":                 user.Setting,
+		"stripe_customer":         user.StripeCustomer,
+		"sidebar_modules":         userSetting.SidebarModules, // 正确提取sidebar_modules字段
+		"permissions":             permissions,
 	}
 }
 

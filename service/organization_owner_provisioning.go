@@ -16,6 +16,7 @@ var (
 	ErrOrganizationOwnerUsernameRequired = errors.New("organization owner username is required")
 	ErrOrganizationOwnerPasswordInvalid  = errors.New("organization owner password is invalid")
 	ErrOrganizationOwnerAccountInvalid   = errors.New("organization owner account is invalid")
+	ErrOrganizationFundReferenceRequired = errors.New("organization fund credit reference is required")
 )
 
 // CreateOrganizationWithOwnerParams provisions a new tenant and a new common
@@ -189,7 +190,8 @@ func CreateOrganizationWithOwnerForPlatform(actorUserID int, params CreateOrgani
 
 // CreditOrganizationFundForPlatform records an operator-authorized external
 // receipt or manual adjustment in the organization budget pool. It never
-// credits a user wallet, and replaying the same request ID is idempotent.
+// credits a user wallet. The external reference is the durable idempotency
+// identity, while RequestID only correlates one HTTP attempt with its audit.
 func CreditOrganizationFundForPlatform(actorUserID int, params CreditOrganizationFundForPlatformParams) (model.OrganizationAccountingResult, error) {
 	if params.OrganizationID <= 0 || params.Amount <= 0 || model.DB == nil {
 		return model.OrganizationAccountingResult{}, model.ErrOrganizationAccountingInvalid
@@ -200,7 +202,7 @@ func CreditOrganizationFundForPlatform(actorUserID int, params CreditOrganizatio
 	}
 	reference := strings.TrimSpace(params.Reference)
 	if reference == "" {
-		reference = requestID
+		return model.OrganizationAccountingResult{}, ErrOrganizationFundReferenceRequired
 	}
 	if len(reference) > 128 {
 		return model.OrganizationAccountingResult{}, model.ErrOrganizationAccountingInvalid
@@ -224,7 +226,7 @@ func CreditOrganizationFundForPlatform(actorUserID int, params CreditOrganizatio
 			Amount:         params.Amount,
 			SourceType:     "platform_fund_credit",
 			SourceId:       reference,
-			IdempotencyKey: fmt.Sprintf("platform-fund:%d:%s", snapshot.Id, requestID),
+			IdempotencyKey: fmt.Sprintf("platform-fund:%d:%x", snapshot.Id, common.Sha256Raw([]byte(reference))),
 			RequestId:      requestID,
 			Actor: model.OrganizationAccountingActor{
 				Kind:   model.OrganizationAccountingActorUser,

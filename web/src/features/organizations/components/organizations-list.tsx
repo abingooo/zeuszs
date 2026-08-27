@@ -52,6 +52,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { formatQuota } from '@/lib/format'
 
 import { listOrganizations, organizationKeys } from '../api'
 import type { Organization, OrganizationStatus } from '../types'
@@ -175,6 +176,9 @@ export function OrganizationsList(props: OrganizationsListProps) {
                     <TableHead>{t('Status')}</TableHead>
                     <TableHead>{t('Owner')}</TableHead>
                     <TableHead className='text-right'>{t('Members')}</TableHead>
+                    <TableHead className='text-right'>
+                      {t('Organization pool balance')}
+                    </TableHead>
                     <TableHead>{t('Member top-ups')}</TableHead>
                     <TableHead className='w-12'>
                       <span className='sr-only'>{t('Actions')}</span>
@@ -214,6 +218,9 @@ export function OrganizationsList(props: OrganizationsListProps) {
                       </TableCell>
                       <TableCell className='text-right font-medium tabular-nums'>
                         {organization.member_count.toLocaleString()}
+                      </TableCell>
+                      <TableCell className='text-right font-medium tabular-nums'>
+                        {formatQuota(organization.fund_quota)}
                       </TableCell>
                       <TableCell>
                         {organization.allow_member_topup
@@ -285,7 +292,13 @@ export function OrganizationsList(props: OrganizationsListProps) {
                         </dt>
                         <dd>{organization.member_count.toLocaleString()}</dd>
                       </div>
-                      <div className='col-span-2'>
+                      <div>
+                        <dt className='text-muted-foreground text-xs'>
+                          {t('Organization pool balance')}
+                        </dt>
+                        <dd>{formatQuota(organization.fund_quota)}</dd>
+                      </div>
+                      <div>
                         <dt className='text-muted-foreground text-xs'>
                           {t('Member top-ups')}
                         </dt>

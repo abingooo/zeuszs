@@ -98,6 +98,12 @@ func TestOrganizationAdminRoutesRejectTenantOwnerAndAdminWithoutPlatformRole(t *
 			path:   "/api/organization/admin/17/members",
 			body:   `{"username":"bypass-admin","password":"password123","organization_role":"admin"}`,
 		},
+		{
+			name:   "complete organization topup",
+			method: http.MethodPost,
+			path:   "/api/organization/admin/topup/complete",
+			body:   `{"trade_no":"bypass-order"}`,
+		},
 	}
 
 	for organizationRole, accessToken := range accessTokens {

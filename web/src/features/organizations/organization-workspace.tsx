@@ -32,6 +32,7 @@ import {
 } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useAuthStore } from '@/stores/auth-store'
 
 import {
   TenantOrganizationAuditPanel,
@@ -97,6 +98,13 @@ export function OrganizationWorkspaceView(props: {
 
 export function OrganizationWorkspace() {
   const { t } = useTranslation()
+  const organizationRole = useAuthStore(
+    (state) => state.auth.user?.organization_role
+  )
+  const title =
+    organizationRole === 'owner' || organizationRole === 'admin'
+      ? t('Manage organization')
+      : t('My organization')
   const summaryQuery = useQuery({
     queryKey: tenantOrganizationKeys.summary(),
     queryFn: getTenantOrganizationSummary,
@@ -104,7 +112,7 @@ export function OrganizationWorkspace() {
 
   return (
     <SectionPageLayout fixedContent>
-      <SectionPageLayout.Title>{t('My organization')}</SectionPageLayout.Title>
+      <SectionPageLayout.Title>{title}</SectionPageLayout.Title>
       <SectionPageLayout.Content>
         {summaryQuery.isLoading && (
           <div className='flex flex-col gap-3'>

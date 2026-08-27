@@ -25,6 +25,7 @@ var (
 type TenantOrganizationSummary struct {
 	OrganizationID   int                            `json:"organization_id"`
 	Name             string                         `json:"name"`
+	IsDefault        bool                           `json:"is_default"`
 	Status           model.OrganizationStatus       `json:"status"`
 	CurrentUserRole  model.OrganizationRole         `json:"current_user_role"`
 	MemberStatus     model.OrganizationMemberStatus `json:"member_status"`
@@ -101,6 +102,7 @@ type TenantOrganizationLedgerView struct {
 	SourceType            string `json:"source_type"`
 	SourceID              string `json:"source_id"`
 	ActorUserID           int    `json:"actor_user_id"`
+	InitiatorUserID       *int   `json:"initiator_user_id,omitempty"`
 	RequestID             string `json:"request_id"`
 	UserQuotaDelta        int64  `json:"user_quota_delta"`
 	PoolQuotaDelta        int64  `json:"pool_quota_delta"`
@@ -126,14 +128,15 @@ type ListTenantOrganizationAuditParams struct {
 }
 
 type TenantOrganizationAuditView struct {
-	ID          int64           `json:"id"`
-	ActorUserID int             `json:"actor_user_id"`
-	Action      string          `json:"action"`
-	TargetType  string          `json:"target_type"`
-	TargetID    string          `json:"target_id"`
-	RequestID   string          `json:"request_id"`
-	Metadata    json.RawMessage `json:"metadata"`
-	CreatedAt   int64           `json:"created_at"`
+	ID              int64           `json:"id"`
+	ActorUserID     int             `json:"actor_user_id"`
+	InitiatorUserID *int            `json:"initiator_user_id,omitempty"`
+	Action          string          `json:"action"`
+	TargetType      string          `json:"target_type"`
+	TargetID        string          `json:"target_id"`
+	RequestID       string          `json:"request_id"`
+	Metadata        json.RawMessage `json:"metadata"`
+	CreatedAt       int64           `json:"created_at"`
 }
 
 type TenantOrganizationAuditListResult struct {
@@ -193,9 +196,14 @@ func GetTenantOrganizationSummary(principal OrganizationPrincipal) (*TenantOrgan
 		if err != nil {
 			return err
 		}
+		isDefault := organization.SystemKey != nil && *organization.SystemKey == model.DefaultOrganizationSystemKey
+		if isDefault && actor.OrganizationRole == model.OrganizationRoleMember {
+			return ErrOrganizationActionForbidden
+		}
 		summary = TenantOrganizationSummary{
 			OrganizationID:   organization.Id,
 			Name:             organization.Name,
+			IsDefault:        isDefault,
 			Status:           organization.Status,
 			CurrentUserRole:  actor.OrganizationRole,
 			MemberStatus:     actor.OrganizationStatus,
@@ -796,7 +804,7 @@ func ListTenantOrganizationLedger(principal OrganizationPrincipal, params ListTe
 			result.Items = append(result.Items, TenantOrganizationLedgerView{
 				ID: ledger.Id, UserID: ledger.UserId, ProjectID: ledger.ProjectId,
 				Operation: ledger.Operation, SourceType: ledger.SourceType, SourceID: ledger.SourceId,
-				ActorUserID: ledger.ActorUserId, RequestID: ledger.RequestId,
+				ActorUserID: ledger.ActorUserId, InitiatorUserID: ledger.InitiatorUserId, RequestID: ledger.RequestId,
 				UserQuotaDelta: ledger.UserQuotaDelta, PoolQuotaDelta: ledger.PoolQuotaDelta,
 				RecoverableQuotaDelta: ledger.RecoverableQuotaDelta, UserQuotaAfter: ledger.UserQuotaAfter,
 				PoolQuotaAfter: ledger.PoolQuotaAfter, RecoverableQuotaAfter: ledger.RecoverableQuotaAfter,
@@ -853,7 +861,7 @@ func ListTenantOrganizationAudit(principal OrganizationPrincipal, params ListTen
 				return err
 			}
 			result.Items = append(result.Items, TenantOrganizationAuditView{
-				ID: event.Id, ActorUserID: event.ActorUserId, Action: event.Action,
+				ID: event.Id, ActorUserID: event.ActorUserId, InitiatorUserID: event.InitiatorUserId, Action: event.Action,
 				TargetType: event.TargetType, TargetID: event.TargetId, RequestID: event.RequestId,
 				Metadata: metadata, CreatedAt: event.CreatedAt,
 			})

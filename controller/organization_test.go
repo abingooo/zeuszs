@@ -146,19 +146,27 @@ func TestCreditPlatformOrganizationFundControllerCreditsPoolOnly(t *testing.T) {
 }
 
 func TestBuildSelfUserDataIncludesOrganizationIdentity(t *testing.T) {
+	db := setupOrganizationControllerTestDB(t)
+	systemKey := model.DefaultOrganizationSystemKey
+	organization := model.Organization{
+		Name: "Renamed default tenant", SystemKey: &systemKey,
+		Status: model.OrganizationStatusActive, OwnerUserId: 42, PolicyVersion: 1,
+	}
+	require.NoError(t, db.Create(&organization).Error)
 	user := &model.User{
 		Id:                 42,
 		Username:           "organization-session-user",
 		Role:               common.RoleCommonUser,
-		OrganizationId:     91,
+		OrganizationId:     organization.Id,
 		OrganizationRole:   model.OrganizationRoleAdmin,
 		OrganizationStatus: model.OrganizationMemberStatusActive,
 	}
 
 	data := buildSelfUserData(user)
-	assert.Equal(t, 91, data["organization_id"])
+	assert.Equal(t, organization.Id, data["organization_id"])
 	assert.Equal(t, model.OrganizationRoleAdmin, data["organization_role"])
 	assert.Equal(t, model.OrganizationMemberStatusActive, data["organization_status"])
+	assert.Equal(t, true, data["organization_is_default"])
 }
 
 func TestProvisionPlatformOrganizationMemberControllerCreatesAdmin(t *testing.T) {

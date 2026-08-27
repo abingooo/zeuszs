@@ -94,6 +94,14 @@ func seedOrganizationTaskUsage(t *testing.T, fixture organizationTaskBillingFixt
 	}).Error)
 }
 
+func seedOrganizationSubscriptionTaskUsage(t *testing.T, fixture organizationTaskBillingFixture, quota int) {
+	t.Helper()
+	seedOrganizationTaskUsage(t, fixture, quota)
+	require.NoError(t, model.DB.Model(&model.OrganizationMemberFund{}).
+		Where("organization_id = ? AND user_id = ?", fixture.organization.Id, fixture.user.Id).
+		Update("consumed_quota", quota).Error)
+}
+
 func loadOrganizationTaskBillingBalances(t *testing.T, fixture organizationTaskBillingFixture) (model.User, model.OrganizationMemberFund, model.Token, model.Channel) {
 	t.Helper()
 	var user model.User
@@ -361,24 +369,32 @@ func TestOrganizationTaskAdjustmentRollsBackOnTokenFailureAndRetriesAtomically(t
 	assert.EqualValues(t, 1, billingLogs)
 }
 
-func TestOrganizationSubscriptionTaskRefundDoesNotRequireWalletReservation(t *testing.T) {
-	fixture := setupOrganizationTaskBillingTest(t, 200, 100)
+func TestOrganizationSubscriptionTaskRefundMetersOrganizationAndAppliesSideEffectsOnce(t *testing.T) {
+	fixture := setupOrganizationTaskBillingTest(t, 200, 0)
 	subscription := model.UserSubscription{
 		UserId: fixture.user.Id, AmountTotal: 1000, AmountUsed: 120,
 		Status: "active", StartTime: time.Now().Add(-time.Hour).Unix(), EndTime: time.Now().Add(time.Hour).Unix(),
 	}
 	require.NoError(t, model.DB.Create(&subscription).Error)
-	seedOrganizationTaskUsage(t, fixture, 120)
+	seedOrganizationSubscriptionTaskUsage(t, fixture, 120)
 	task := model.Task{
 		TaskID: "organization-subscription-refund", UserId: fixture.user.Id, ChannelId: fixture.channel.Id,
 		Quota: 120, Status: model.TaskStatusFailure, Group: "default", CreatedAt: time.Now().Unix(), UpdatedAt: time.Now().Unix(),
 		PrivateData: model.TaskPrivateData{
-			BillingSource: BillingSourceSubscription, SubscriptionId: subscription.Id, TokenId: fixture.token.Id,
+			BillingSource:                   BillingSourceSubscription,
+			SubscriptionId:                  subscription.Id,
+			OrganizationSubscriptionMetered: true,
+			TokenId:                         fixture.token.Id,
 		},
 	}
 	require.NoError(t, model.DB.Create(&task).Error)
+	var firstPoll model.Task
+	var stalePoll model.Task
+	require.NoError(t, model.DB.First(&firstPoll, task.ID).Error)
+	require.NoError(t, model.DB.First(&stalePoll, task.ID).Error)
 
-	assert.True(t, RefundTaskQuota(context.Background(), &task, "failed"))
+	assert.True(t, RefundTaskQuota(context.Background(), &firstPoll, "failed"))
+	assert.True(t, RefundTaskQuota(context.Background(), &stalePoll, "stale duplicate"))
 
 	var persistedSubscription model.UserSubscription
 	require.NoError(t, model.DB.First(&persistedSubscription, subscription.Id).Error)
@@ -386,15 +402,120 @@ func TestOrganizationSubscriptionTaskRefundDoesNotRequireWalletReservation(t *te
 	var persistedTask model.Task
 	require.NoError(t, model.DB.First(&persistedTask, task.ID).Error)
 	assert.Zero(t, persistedTask.Quota)
+	assert.EqualValues(t, 1, persistedTask.BillingRevision)
 	user, fund, token, channel := loadOrganizationTaskBillingBalances(t, fixture)
 	assert.Equal(t, 200, user.Quota)
-	assert.EqualValues(t, 100, fund.RecoverableQuota)
+	assert.Zero(t, user.UsedQuota)
+	assert.Zero(t, fund.RecoverableQuota)
+	assert.Zero(t, fund.ConsumedQuota)
 	assert.Equal(t, 1000, token.RemainQuota)
 	assert.Zero(t, token.UsedQuota)
 	assert.Zero(t, channel.UsedQuota)
+	var refundLogs int64
+	require.NoError(t, model.DB.Model(&model.Log{}).
+		Where("user_id = ? AND type = ?", fixture.user.Id, model.LogTypeRefund).
+		Count(&refundLogs).Error)
+	assert.EqualValues(t, 1, refundLogs)
 }
 
-func TestOrganizationSubscriptionTaskAdjustmentDoesNotRequireWalletReservation(t *testing.T) {
+func TestOrganizationSubscriptionTaskAdjustmentMetersOrganizationAndRejectsStaleDuplicate(t *testing.T) {
+	fixture := setupOrganizationTaskBillingTest(t, 200, 0)
+	subscription := model.UserSubscription{
+		UserId: fixture.user.Id, AmountTotal: 1000, AmountUsed: 120,
+		Status: "active", StartTime: time.Now().Add(-time.Hour).Unix(), EndTime: time.Now().Add(time.Hour).Unix(),
+	}
+	require.NoError(t, model.DB.Create(&subscription).Error)
+	seedOrganizationSubscriptionTaskUsage(t, fixture, 120)
+	task := model.Task{
+		TaskID: "organization-subscription-adjust", UserId: fixture.user.Id, ChannelId: fixture.channel.Id,
+		Quota: 120, Status: model.TaskStatusSuccess, Group: "default", CreatedAt: time.Now().Unix(), UpdatedAt: time.Now().Unix(),
+		PrivateData: model.TaskPrivateData{
+			BillingSource:                   BillingSourceSubscription,
+			SubscriptionId:                  subscription.Id,
+			OrganizationSubscriptionMetered: true,
+			TokenId:                         fixture.token.Id,
+		},
+	}
+	require.NoError(t, model.DB.Create(&task).Error)
+	var firstPoll model.Task
+	var stalePoll model.Task
+	require.NoError(t, model.DB.First(&firstPoll, task.ID).Error)
+	require.NoError(t, model.DB.First(&stalePoll, task.ID).Error)
+
+	RecalculateTaskQuota(context.Background(), &firstPoll, 150, "actual usage")
+	RecalculateTaskQuota(context.Background(), &stalePoll, 150, "stale duplicate")
+
+	var persistedSubscription model.UserSubscription
+	require.NoError(t, model.DB.First(&persistedSubscription, subscription.Id).Error)
+	assert.EqualValues(t, 150, persistedSubscription.AmountUsed)
+	var persistedTask model.Task
+	require.NoError(t, model.DB.First(&persistedTask, task.ID).Error)
+	assert.Equal(t, 150, persistedTask.Quota)
+	assert.EqualValues(t, 1, persistedTask.BillingRevision)
+	user, fund, token, channel := loadOrganizationTaskBillingBalances(t, fixture)
+	assert.Equal(t, 200, user.Quota)
+	assert.Equal(t, 150, user.UsedQuota)
+	assert.Zero(t, fund.RecoverableQuota)
+	assert.EqualValues(t, 150, fund.ConsumedQuota)
+	assert.Equal(t, 850, token.RemainQuota)
+	assert.Equal(t, 150, token.UsedQuota)
+	assert.EqualValues(t, 150, channel.UsedQuota)
+	var billingLogs int64
+	require.NoError(t, model.DB.Model(&model.Log{}).Where("user_id = ?", fixture.user.Id).Count(&billingLogs).Error)
+	assert.EqualValues(t, 1, billingLogs)
+}
+
+func TestOrganizationSubscriptionTaskConsumptionLimitRollsBackAllBillingState(t *testing.T) {
+	fixture := setupOrganizationTaskBillingTest(t, 200, 0)
+	limit := int64(140)
+	require.NoError(t, model.DB.Model(&model.OrganizationMemberFund{}).
+		Where("organization_id = ? AND user_id = ?", fixture.organization.Id, fixture.user.Id).
+		Update("consumption_limit", limit).Error)
+	subscription := model.UserSubscription{
+		UserId: fixture.user.Id, AmountTotal: 1000, AmountUsed: 120,
+		Status: "active", StartTime: time.Now().Add(-time.Hour).Unix(), EndTime: time.Now().Add(time.Hour).Unix(),
+	}
+	require.NoError(t, model.DB.Create(&subscription).Error)
+	seedOrganizationSubscriptionTaskUsage(t, fixture, 120)
+	task := model.Task{
+		TaskID: "organization-subscription-limit", UserId: fixture.user.Id, ChannelId: fixture.channel.Id,
+		Quota: 120, Status: model.TaskStatusSuccess, Group: "default", CreatedAt: time.Now().Unix(), UpdatedAt: time.Now().Unix(),
+		PrivateData: model.TaskPrivateData{
+			BillingSource:                   BillingSourceSubscription,
+			SubscriptionId:                  subscription.Id,
+			OrganizationSubscriptionMetered: true,
+			TokenId:                         fixture.token.Id,
+		},
+	}
+	require.NoError(t, model.DB.Create(&task).Error)
+
+	_, err := model.ApplyOrganizationTaskBillingMutation(model.OrganizationTaskBillingMutationParams{
+		TaskId: task.ID, UserId: fixture.user.Id, OrganizationId: fixture.organization.Id,
+		SubscriptionId: subscription.Id, TokenId: fixture.token.Id, ChannelId: fixture.channel.Id,
+		ExpectedQuota: 120, ActualQuota: 150, OperationId: "organization-subscription-limit-adjust",
+	})
+	require.ErrorIs(t, err, model.ErrOrganizationConsumptionLimit)
+
+	var persistedSubscription model.UserSubscription
+	require.NoError(t, model.DB.First(&persistedSubscription, subscription.Id).Error)
+	assert.EqualValues(t, 120, persistedSubscription.AmountUsed)
+	var persistedTask model.Task
+	require.NoError(t, model.DB.First(&persistedTask, task.ID).Error)
+	assert.Equal(t, 120, persistedTask.Quota)
+	assert.Zero(t, persistedTask.BillingRevision)
+	user, fund, token, channel := loadOrganizationTaskBillingBalances(t, fixture)
+	assert.Equal(t, 200, user.Quota)
+	assert.Equal(t, 120, user.UsedQuota)
+	require.NotNil(t, fund.ConsumptionLimit)
+	assert.EqualValues(t, 140, *fund.ConsumptionLimit)
+	assert.Zero(t, fund.RecoverableQuota)
+	assert.EqualValues(t, 120, fund.ConsumedQuota)
+	assert.Equal(t, 880, token.RemainQuota)
+	assert.Equal(t, 120, token.UsedQuota)
+	assert.EqualValues(t, 120, channel.UsedQuota)
+}
+
+func TestLegacyOrganizationSubscriptionTaskWithoutMeteringMarkerKeepsLegacySettlement(t *testing.T) {
 	fixture := setupOrganizationTaskBillingTest(t, 200, 100)
 	subscription := model.UserSubscription{
 		UserId: fixture.user.Id, AmountTotal: 1000, AmountUsed: 120,
@@ -403,7 +524,7 @@ func TestOrganizationSubscriptionTaskAdjustmentDoesNotRequireWalletReservation(t
 	require.NoError(t, model.DB.Create(&subscription).Error)
 	seedOrganizationTaskUsage(t, fixture, 120)
 	task := model.Task{
-		TaskID: "organization-subscription-adjust", UserId: fixture.user.Id, ChannelId: fixture.channel.Id,
+		TaskID: "legacy-organization-subscription-adjust", UserId: fixture.user.Id, ChannelId: fixture.channel.Id,
 		Quota: 120, Status: model.TaskStatusSuccess, Group: "default", CreatedAt: time.Now().Unix(), UpdatedAt: time.Now().Unix(),
 		PrivateData: model.TaskPrivateData{
 			BillingSource: BillingSourceSubscription, SubscriptionId: subscription.Id, TokenId: fixture.token.Id,
@@ -411,7 +532,7 @@ func TestOrganizationSubscriptionTaskAdjustmentDoesNotRequireWalletReservation(t
 	}
 	require.NoError(t, model.DB.Create(&task).Error)
 
-	RecalculateTaskQuota(context.Background(), &task, 150, "actual usage")
+	RecalculateTaskQuota(context.Background(), &task, 150, "legacy task settlement")
 
 	var persistedSubscription model.UserSubscription
 	require.NoError(t, model.DB.First(&persistedSubscription, subscription.Id).Error)
@@ -421,7 +542,9 @@ func TestOrganizationSubscriptionTaskAdjustmentDoesNotRequireWalletReservation(t
 	assert.Equal(t, 150, persistedTask.Quota)
 	user, fund, token, channel := loadOrganizationTaskBillingBalances(t, fixture)
 	assert.Equal(t, 200, user.Quota)
+	assert.Equal(t, 150, user.UsedQuota)
 	assert.EqualValues(t, 100, fund.RecoverableQuota)
+	assert.Zero(t, fund.ConsumedQuota)
 	assert.Equal(t, 850, token.RemainQuota)
 	assert.Equal(t, 150, token.UsedQuota)
 	assert.EqualValues(t, 150, channel.UsedQuota)

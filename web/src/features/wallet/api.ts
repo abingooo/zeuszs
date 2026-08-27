@@ -39,6 +39,7 @@ import type {
   WaffoPaymentResponse,
   WaffoPancakePaymentRequest,
   WaffoPancakePaymentResponse,
+  TopUpTarget,
 } from './types'
 
 // ============================================================================
@@ -50,6 +51,12 @@ import type {
  */
 export function isApiSuccess(response: ApiResponse): boolean {
   return response.success === true || response.message === 'success'
+}
+
+function getTopUpEndpoint(target: TopUpTarget, path: string): string {
+  return target === 'organization'
+    ? `/api/organization/topup${path}`
+    : `/api/user${path}`
 }
 
 /**
@@ -76,9 +83,13 @@ export async function redeemTopupCode(
 export async function calculateAmount(
   request: AmountRequest
 ): Promise<AmountResponse> {
-  const res = await api.post('/api/user/amount', request, {
-    skipBusinessError: true,
-  } as Record<string, unknown>)
+  const res = await api.post(
+    getTopUpEndpoint(request.topup_target, '/amount'),
+    request,
+    {
+      skipBusinessError: true,
+    } as Record<string, unknown>
+  )
   return res.data
 }
 
@@ -88,9 +99,13 @@ export async function calculateAmount(
 export async function calculateStripeAmount(
   request: AmountRequest
 ): Promise<AmountResponse> {
-  const res = await api.post('/api/user/stripe/amount', request, {
-    skipBusinessError: true,
-  } as Record<string, unknown>)
+  const res = await api.post(
+    getTopUpEndpoint(request.topup_target, '/stripe/amount'),
+    request,
+    {
+      skipBusinessError: true,
+    } as Record<string, unknown>
+  )
   return res.data
 }
 
@@ -100,9 +115,13 @@ export async function calculateStripeAmount(
 export async function calculateWaffoAmount(
   request: AmountRequest
 ): Promise<AmountResponse> {
-  const res = await api.post('/api/user/waffo/amount', request, {
-    skipBusinessError: true,
-  } as Record<string, unknown>)
+  const res = await api.post(
+    getTopUpEndpoint(request.topup_target, '/waffo/amount'),
+    request,
+    {
+      skipBusinessError: true,
+    } as Record<string, unknown>
+  )
   return res.data
 }
 
@@ -112,9 +131,13 @@ export async function calculateWaffoAmount(
 export async function requestPayment(
   request: PaymentRequest
 ): Promise<PaymentResponse> {
-  const res = await api.post('/api/user/pay', request, {
-    skipBusinessError: true,
-  } as Record<string, unknown>)
+  const res = await api.post(
+    getTopUpEndpoint(request.topup_target, '/pay'),
+    request,
+    {
+      skipBusinessError: true,
+    } as Record<string, unknown>
+  )
   return {
     ...res.data,
     url: res.data.url || (res as unknown as { url?: string }).url,
@@ -127,9 +150,13 @@ export async function requestPayment(
 export async function requestStripePayment(
   request: PaymentRequest
 ): Promise<StripePaymentResponse> {
-  const res = await api.post('/api/user/stripe/pay', request, {
-    skipBusinessError: true,
-  } as Record<string, unknown>)
+  const res = await api.post(
+    getTopUpEndpoint(request.topup_target, '/stripe/pay'),
+    request,
+    {
+      skipBusinessError: true,
+    } as Record<string, unknown>
+  )
   return res.data
 }
 
@@ -139,9 +166,13 @@ export async function requestStripePayment(
 export async function requestCreemPayment(
   request: CreemPaymentRequest
 ): Promise<CreemPaymentResponse> {
-  const res = await api.post('/api/user/creem/pay', request, {
-    skipBusinessError: true,
-  } as Record<string, unknown>)
+  const res = await api.post(
+    getTopUpEndpoint(request.topup_target, '/creem/pay'),
+    request,
+    {
+      skipBusinessError: true,
+    } as Record<string, unknown>
+  )
   return res.data
 }
 
@@ -151,9 +182,13 @@ export async function requestCreemPayment(
 export async function requestWaffoPayment(
   request: WaffoPaymentRequest
 ): Promise<WaffoPaymentResponse> {
-  const res = await api.post('/api/user/waffo/pay', request, {
-    skipBusinessError: true,
-  } as Record<string, unknown>)
+  const res = await api.post(
+    getTopUpEndpoint(request.topup_target, '/waffo/pay'),
+    request,
+    {
+      skipBusinessError: true,
+    } as Record<string, unknown>
+  )
   return res.data
 }
 
@@ -163,9 +198,13 @@ export async function requestWaffoPayment(
 export async function calculateWaffoPancakeAmount(
   request: AmountRequest
 ): Promise<AmountResponse> {
-  const res = await api.post('/api/user/waffo-pancake/amount', request, {
-    skipBusinessError: true,
-  } as Record<string, unknown>)
+  const res = await api.post(
+    getTopUpEndpoint(request.topup_target, '/waffo-pancake/amount'),
+    request,
+    {
+      skipBusinessError: true,
+    } as Record<string, unknown>
+  )
   return res.data
 }
 
@@ -175,9 +214,13 @@ export async function calculateWaffoPancakeAmount(
 export async function requestWaffoPancakePayment(
   request: WaffoPancakePaymentRequest
 ): Promise<WaffoPancakePaymentResponse> {
-  const res = await api.post('/api/user/waffo-pancake/pay', request, {
-    skipBusinessError: true,
-  } as Record<string, unknown>)
+  const res = await api.post(
+    getTopUpEndpoint(request.topup_target, '/waffo-pancake/pay'),
+    request,
+    {
+      skipBusinessError: true,
+    } as Record<string, unknown>
+  )
   return res.data
 }
 
@@ -205,7 +248,8 @@ export async function transferAffiliateQuota(
 export async function getUserBillingHistory(
   page: number,
   pageSize: number,
-  keyword?: string
+  keyword?: string,
+  target: TopUpTarget = 'personal'
 ): Promise<ApiResponse<BillingHistoryResponse>> {
   const params = new URLSearchParams({
     p: page.toString(),
@@ -214,7 +258,11 @@ export async function getUserBillingHistory(
   if (keyword) {
     params.append('keyword', keyword)
   }
-  const res = await api.get(`/api/user/topup/self?${params.toString()}`)
+  const endpoint =
+    target === 'organization'
+      ? '/api/organization/topup/self'
+      : '/api/user/topup/self'
+  const res = await api.get(`${endpoint}?${params.toString()}`)
   return res.data
 }
 
@@ -243,6 +291,10 @@ export async function getAllBillingHistory(
 export async function completeOrder(
   request: CompleteOrderRequest
 ): Promise<ApiResponse> {
-  const res = await api.post('/api/user/topup/complete', request)
+  const endpoint =
+    request.topup_target === 'organization'
+      ? '/api/organization/admin/topup/complete'
+      : '/api/user/topup/complete'
+  const res = await api.post(endpoint, request)
   return res.data
 }

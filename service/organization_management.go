@@ -26,6 +26,7 @@ var (
 	ErrOrganizationOwnerConflict          = errors.New("organization already has a different owner")
 	ErrOrganizationOwnerDemotionForbidden = errors.New("organization owner cannot be demoted without a replacement")
 	ErrOrganizationStatusInvalid          = errors.New("invalid organization status")
+	ErrOrganizationStatusTransition       = errors.New("invalid organization status transition")
 )
 
 // CreateOrganizationParams contains only platform-controlled provisioning
@@ -48,6 +49,7 @@ type OrganizationListItem struct {
 	model.Organization
 	MemberCount   int64  `json:"member_count"`
 	OwnerUsername string `json:"owner_username,omitempty"`
+	FundQuota     int64  `json:"fund_quota"`
 }
 
 type OrganizationListResult struct {
@@ -106,6 +108,21 @@ func normalizeOrganizationStatus(status model.OrganizationStatus) (model.Organiz
 		return status, nil
 	default:
 		return "", ErrOrganizationStatusInvalid
+	}
+}
+
+func validOrganizationStatusTransition(from model.OrganizationStatus, to model.OrganizationStatus) bool {
+	switch from {
+	case model.OrganizationStatusActive:
+		return to == model.OrganizationStatusDisabled || to == model.OrganizationStatusDissolving
+	case model.OrganizationStatusDisabled:
+		return to == model.OrganizationStatusActive || to == model.OrganizationStatusDissolving
+	case model.OrganizationStatusDissolving:
+		return to == model.OrganizationStatusActive || to == model.OrganizationStatusDissolved
+	case model.OrganizationStatusDissolved:
+		return false
+	default:
+		return false
 	}
 }
 
@@ -330,16 +347,70 @@ func ListOrganizationsForPlatform(actorUserID int, params ListOrganizationsParam
 	if err := query.Order("id asc").Offset(params.Offset).Limit(params.Limit).Find(&organizations).Error; err != nil {
 		return nil, err
 	}
-	items := make([]OrganizationListItem, 0, len(organizations))
+	organizationIDs := make([]int, 0, len(organizations))
+	ownerIDs := make([]int, 0, len(organizations))
 	for _, organization := range organizations {
-		item := OrganizationListItem{Organization: organization}
-		if err := model.DB.Model(&model.User{}).Where("organization_id = ?", organization.Id).Count(&item.MemberCount).Error; err != nil {
+		organizationIDs = append(organizationIDs, organization.Id)
+		if organization.OwnerUserId > 0 {
+			ownerIDs = append(ownerIDs, organization.OwnerUserId)
+		}
+	}
+
+	fundQuotas := make(map[int]int64, len(organizations))
+	fundAccounts := make(map[int]struct{}, len(organizations))
+	memberCounts := make(map[int]int64, len(organizations))
+	ownerNames := make(map[int]string, len(ownerIDs))
+	if len(organizationIDs) > 0 {
+		var funds []model.OrganizationFundAccount
+		if err := model.DB.Where("organization_id IN ?", organizationIDs).Find(&funds).Error; err != nil {
 			return nil, err
 		}
-		if organization.OwnerUserId > 0 {
-			if err := model.DB.Model(&model.User{}).Where("id = ?", organization.OwnerUserId).Select("username").Scan(&item.OwnerUsername).Error; err != nil {
-				return nil, err
-			}
+		for _, fund := range funds {
+			fundQuotas[fund.OrganizationId] = fund.Quota
+			fundAccounts[fund.OrganizationId] = struct{}{}
+		}
+
+		var counts []struct {
+			OrganizationID int   `gorm:"column:organization_id"`
+			MemberCount    int64 `gorm:"column:member_count"`
+		}
+		if err := model.DB.Model(&model.User{}).
+			Select("organization_id, COUNT(*) AS member_count").
+			Where("organization_id IN ?", organizationIDs).
+			Group("organization_id").
+			Scan(&counts).Error; err != nil {
+			return nil, err
+		}
+		for _, count := range counts {
+			memberCounts[count.OrganizationID] = count.MemberCount
+		}
+	}
+	if len(ownerIDs) > 0 {
+		var owners []struct {
+			ID       int    `gorm:"column:id"`
+			Username string `gorm:"column:username"`
+		}
+		if err := model.DB.Model(&model.User{}).
+			Select("id, username").
+			Where("id IN ?", ownerIDs).
+			Find(&owners).Error; err != nil {
+			return nil, err
+		}
+		for _, owner := range owners {
+			ownerNames[owner.ID] = owner.Username
+		}
+	}
+
+	items := make([]OrganizationListItem, 0, len(organizations))
+	for _, organization := range organizations {
+		if _, ok := fundAccounts[organization.Id]; !ok {
+			return nil, gorm.ErrRecordNotFound
+		}
+		item := OrganizationListItem{
+			Organization:  organization,
+			MemberCount:   memberCounts[organization.Id],
+			OwnerUsername: ownerNames[organization.OwnerUserId],
+			FundQuota:     fundQuotas[organization.Id],
 		}
 		items = append(items, item)
 	}
@@ -375,6 +446,12 @@ func UpdateOrganizationStatusForPlatform(actorUserID int, params UpdateOrganizat
 		oldStatus := organization.Status
 		if oldStatus == status {
 			return nil
+		}
+		if organization.SystemKey != nil && *organization.SystemKey == model.DefaultOrganizationSystemKey {
+			return model.ErrDefaultOrganizationConflict
+		}
+		if !validOrganizationStatusTransition(oldStatus, status) {
+			return ErrOrganizationStatusTransition
 		}
 		var userIDs []int
 		if err := tx.Model(&model.User{}).Where("organization_id = ?", organization.Id).Order("id asc").Pluck("id", &userIDs).Error; err != nil {
@@ -683,12 +760,18 @@ func OrganizationManagementErrorCode(err error) string {
 		return "ORGANIZATION_OWNER_INVALID"
 	case errors.Is(err, ErrOrganizationStatusInvalid):
 		return "ORGANIZATION_STATUS_INVALID"
+	case errors.Is(err, ErrOrganizationStatusTransition):
+		return "ORGANIZATION_STATUS_TRANSITION_INVALID"
+	case errors.Is(err, model.ErrDefaultOrganizationConflict):
+		return "DEFAULT_ORGANIZATION_PROTECTED"
 	case errors.Is(err, ErrOrganizationOwnerUsernameRequired):
 		return "ORGANIZATION_OWNER_USERNAME_REQUIRED"
 	case errors.Is(err, ErrOrganizationOwnerPasswordInvalid):
 		return "ORGANIZATION_OWNER_PASSWORD_INVALID"
 	case errors.Is(err, ErrOrganizationOwnerAccountInvalid):
 		return "ORGANIZATION_OWNER_ACCOUNT_INVALID"
+	case errors.Is(err, ErrOrganizationFundReferenceRequired):
+		return "ORGANIZATION_FUND_REFERENCE_REQUIRED"
 	case errors.Is(err, ErrOrganizationMemberUsernameRequired):
 		return "ORGANIZATION_MEMBER_USERNAME_REQUIRED"
 	case errors.Is(err, ErrOrganizationMemberPasswordInvalid):

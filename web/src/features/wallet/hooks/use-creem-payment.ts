@@ -21,6 +21,7 @@ import { useState, useCallback } from 'react'
 import { toast } from 'sonner'
 
 import { requestCreemPayment, isApiSuccess } from '../api'
+import type { TopUpTarget } from '../types'
 
 /**
  * Hook for handling Creem payment processing
@@ -28,29 +29,33 @@ import { requestCreemPayment, isApiSuccess } from '../api'
 export function useCreemPayment() {
   const [processing, setProcessing] = useState(false)
 
-  const processCreemPayment = useCallback(async (productId: string) => {
-    setProcessing(true)
-    try {
-      const response = await requestCreemPayment({
-        product_id: productId,
-        payment_method: 'creem',
-      })
+  const processCreemPayment = useCallback(
+    async (productId: string, topUpTarget: TopUpTarget) => {
+      setProcessing(true)
+      try {
+        const response = await requestCreemPayment({
+          product_id: productId,
+          payment_method: 'creem',
+          topup_target: topUpTarget,
+        })
 
-      if (isApiSuccess(response) && response.data?.checkout_url) {
-        window.open(response.data.checkout_url, '_blank')
-        toast.success(i18next.t('Redirecting to Creem checkout...'))
-        return true
+        if (isApiSuccess(response) && response.data?.checkout_url) {
+          window.open(response.data.checkout_url, '_blank')
+          toast.success(i18next.t('Redirecting to Creem checkout...'))
+          return true
+        }
+
+        toast.error(response.message || i18next.t('Payment request failed'))
+        return false
+      } catch {
+        toast.error(i18next.t('Payment request failed'))
+        return false
+      } finally {
+        setProcessing(false)
       }
-
-      toast.error(response.message || i18next.t('Payment request failed'))
-      return false
-    } catch (_error) {
-      toast.error(i18next.t('Payment request failed'))
-      return false
-    } finally {
-      setProcessing(false)
-    }
-  }, [])
+    },
+    []
+  )
 
   return { processing, processCreemPayment }
 }

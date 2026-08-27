@@ -39,6 +39,7 @@ import { useTranslation } from 'react-i18next'
 
 import type { SidebarData } from '@/components/layout/types'
 import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 function OrganizationsNavIcon(props: { className?: string }) {
   return createElement(HugeiconsIcon, {
@@ -56,6 +57,13 @@ function OrganizationsNavIcon(props: { className?: string }) {
  */
 export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
+  const organizationRole = useAuthStore(
+    (state) => state.auth.user?.organization_role
+  )
+  const organizationTitle =
+    organizationRole === 'owner' || organizationRole === 'admin'
+      ? t('Manage organization')
+      : t('My organization')
 
   return {
     navGroups: [
@@ -102,7 +110,7 @@ export function useSidebarData(): SidebarData {
             icon: Wallet,
           },
           {
-            title: t('My organization'),
+            title: organizationTitle,
             url: '/organization',
             icon: OrganizationsNavIcon,
           },

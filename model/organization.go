@@ -122,6 +122,7 @@ type OrganizationQuotaLedger struct {
 	SourceType            string `json:"source_type" gorm:"type:varchar(32);not null;index"`
 	SourceId              string `json:"source_id" gorm:"type:varchar(128);not null;index"`
 	ActorUserId           int    `json:"actor_user_id" gorm:"not null;index"`
+	InitiatorUserId       *int   `json:"initiator_user_id,omitempty" gorm:"index"`
 	IdempotencyKey        string `json:"idempotency_key" gorm:"type:varchar(128);not null;uniqueIndex"`
 	Fingerprint           string `json:"-" gorm:"type:char(64);not null"`
 	RequestId             string `json:"request_id" gorm:"type:varchar(64);not null;index"`
@@ -137,13 +138,14 @@ type OrganizationQuotaLedger struct {
 }
 
 type OrganizationAuditEvent struct {
-	Id             int64  `json:"id"`
-	OrganizationId int    `json:"organization_id" gorm:"not null;index"`
-	ActorUserId    int    `json:"actor_user_id" gorm:"not null;index"`
-	Action         string `json:"action" gorm:"type:varchar(64);not null;index"`
-	TargetType     string `json:"target_type" gorm:"type:varchar(32);not null"`
-	TargetId       string `json:"target_id" gorm:"type:varchar(128);not null"`
-	RequestId      string `json:"request_id" gorm:"type:varchar(64);not null;index"`
-	Metadata       string `json:"metadata" gorm:"type:text;not null"`
-	CreatedAt      int64  `json:"created_at" gorm:"autoCreateTime;index"`
+	Id              int64  `json:"id"`
+	OrganizationId  int    `json:"organization_id" gorm:"not null;index"`
+	ActorUserId     int    `json:"actor_user_id" gorm:"not null;index"`
+	InitiatorUserId *int   `json:"initiator_user_id,omitempty" gorm:"index"`
+	Action          string `json:"action" gorm:"type:varchar(64);not null;index"`
+	TargetType      string `json:"target_type" gorm:"type:varchar(32);not null"`
+	TargetId        string `json:"target_id" gorm:"type:varchar(128);not null"`
+	RequestId       string `json:"request_id" gorm:"type:varchar(64);not null;index"`
+	Metadata        string `json:"metadata" gorm:"type:text;not null"`
+	CreatedAt       int64  `json:"created_at" gorm:"autoCreateTime;index"`
 }

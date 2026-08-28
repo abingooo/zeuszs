@@ -86,4 +86,69 @@ describe('sidebar data', () => {
       expect(item?.title).toBe('Manage organization')
     }
   )
+
+  test('shows organization logs for a non-default organization member', () => {
+    useAuthStore.getState().auth.setUser({
+      id: 1,
+      username: 'member',
+      role: ROLE.USER,
+      organization_id: 17,
+      organization_role: 'member',
+      organization_status: 'active',
+      organization_is_default: false,
+    })
+
+    const { result } = renderHook(() => useSidebarData())
+    const item = result.current.navGroups
+      .flatMap((group) => group.items)
+      .find(
+        (candidate) =>
+          'url' in candidate && candidate.url === '/usage-logs/organization'
+      )
+
+    expect(item).toBeDefined()
+  })
+
+  test('hides organization logs from default organization members', () => {
+    useAuthStore.getState().auth.setUser({
+      id: 1,
+      username: 'default-member',
+      role: ROLE.USER,
+      organization_id: 1,
+      organization_role: 'member',
+      organization_status: 'active',
+      organization_is_default: true,
+    })
+
+    const { result } = renderHook(() => useSidebarData())
+    const item = result.current.navGroups
+      .flatMap((group) => group.items)
+      .find(
+        (candidate) =>
+          'url' in candidate && candidate.url === '/usage-logs/organization'
+      )
+
+    expect(item).toBeUndefined()
+  })
+
+  test.each([ROLE.ADMIN, ROLE.SUPER_ADMIN])(
+    'shows organization logs for platform role %s',
+    (role) => {
+      useAuthStore.getState().auth.setUser({
+        id: role,
+        username: `platform-${role}`,
+        role,
+      })
+
+      const { result } = renderHook(() => useSidebarData())
+      const item = result.current.navGroups
+        .flatMap((group) => group.items)
+        .find(
+          (candidate) =>
+            'url' in candidate && candidate.url === '/usage-logs/organization'
+        )
+
+      expect(item).toBeDefined()
+    }
+  )
 })

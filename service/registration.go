@@ -372,6 +372,21 @@ func claimOrganizationInviteTx(tx *gorm.DB, invite *model.OrganizationInvite, us
 	if err := tx.Create(&use).Error; err != nil {
 		return nil, err
 	}
+	if err := organizationAuditTx(
+		tx,
+		invite.OrganizationId,
+		userID,
+		"organization.member.join",
+		"user",
+		strconv.Itoa(userID),
+		requestID,
+		map[string]interface{}{
+			"organization_role": string(model.OrganizationRoleMember),
+			"code_prefix":       invite.CodePrefix,
+		},
+	); err != nil {
+		return nil, err
+	}
 	return &use, nil
 }
 

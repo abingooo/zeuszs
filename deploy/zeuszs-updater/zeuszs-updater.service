@@ -1,0 +1,30 @@
+[Unit]
+Description=ZEUSZS host update service
+Documentation=https://github.com/abingooo/zeuszs
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+EnvironmentFile=/etc/zeuszs-updater.env
+RuntimeDirectory=zeuszs-updater
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+StateDirectory=zeuszs-updater
+StateDirectoryMode=0700
+ExecStart=/usr/local/sbin/zeuszs-updater
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=25min
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/zeuszs /opt/new-api /run/zeuszs-updater /var/lib/zeuszs-updater
+
+[Install]
+WantedBy=multi-user.target

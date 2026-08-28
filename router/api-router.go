@@ -234,6 +234,7 @@ func SetApiRouter(router *gin.Engine) {
 		}
 		registerChannelRoutes(apiRouter)
 		registerAuthzRoutes(apiRouter)
+		apiRouter.GET("/organization/logs", middleware.UserAuth(), controller.ListOrganizationUsageLogs)
 		organizationRoute := apiRouter.Group("/organization")
 		organizationRoute.Use(middleware.UserAuth(), middleware.RequireActiveOrganization())
 		{
@@ -339,6 +340,8 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/search", middleware.AdminAuth(), controller.SearchAllLogs)
 		logRoute.GET("/self", middleware.UserAuth(), controller.GetUserLogs)
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
+		apiRouter.GET("/zeuszs/update", middleware.AdminAuth(), controller.GetZeusZSUpdate)
+		apiRouter.POST("/zeuszs/update", middleware.AdminAuth(), middleware.UserCriticalRateLimit("zeuszs-update"), controller.TriggerZeusZSUpdate)
 
 		systemTaskRoute := apiRouter.Group("/system-task")
 		systemTaskRoute.Use(middleware.RootAuth())

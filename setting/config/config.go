@@ -18,6 +18,14 @@ type ConfigManager struct {
 
 var GlobalConfig = NewConfigManager()
 
+type configValuesExporter interface {
+	ExportConfigValues() (map[string]string, error)
+}
+
+type configValuesUpdater interface {
+	ApplyConfigValues(map[string]string) error
+}
+
 func NewConfigManager() *ConfigManager {
 	return &ConfigManager{
 		configs: make(map[string]interface{}),
@@ -91,6 +99,10 @@ func (cm *ConfigManager) SaveToDB(updateFunc func(key, value string) error) erro
 
 // 辅助函数：将配置对象转换为map
 func configToMap(config interface{}) (map[string]string, error) {
+	if exporter, ok := config.(configValuesExporter); ok {
+		return exporter.ExportConfigValues()
+	}
+
 	result := make(map[string]string)
 
 	val := reflect.ValueOf(config)
@@ -163,6 +175,10 @@ func configToMap(config interface{}) (map[string]string, error) {
 
 // 辅助函数：从map更新配置对象
 func updateConfigFromMap(config interface{}, configMap map[string]string) error {
+	if updater, ok := config.(configValuesUpdater); ok {
+		return updater.ApplyConfigValues(configMap)
+	}
+
 	val := reflect.ValueOf(config)
 	if val.Kind() != reflect.Ptr {
 		return nil

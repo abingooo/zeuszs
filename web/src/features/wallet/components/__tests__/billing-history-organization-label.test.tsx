@@ -25,6 +25,7 @@ import { BillingHistoryDialog } from '../dialogs/billing-history-dialog'
 
 const mocks = vi.hoisted(() => ({
   records: [] as TopupRecord[],
+  showInternalIds: true,
 }))
 
 vi.mock('@/components/dialog', () => ({
@@ -34,6 +35,10 @@ vi.mock('@/components/dialog', () => ({
 
 vi.mock('@/components/status-badge', () => ({
   StatusBadge: (props: { label: string }) => <span>{props.label}</span>,
+}))
+
+vi.mock('@/hooks/use-id-visibility', () => ({
+  useIdVisibility: () => mocks.showInternalIds,
 }))
 
 vi.mock('../../hooks/use-billing-history', () => ({
@@ -71,6 +76,7 @@ function organizationOrder(id: number, organizationName?: string): TopupRecord {
 
 beforeEach(() => {
   mocks.records = []
+  mocks.showInternalIds = true
 })
 
 describe('billing history organization labels', () => {
@@ -128,5 +134,36 @@ describe('billing history organization labels', () => {
     expect(
       screen.queryByRole('button', { name: 'Complete Order' })
     ).not.toBeInTheDocument()
+  })
+
+  test('hides user IDs when internal ID visibility is disabled', () => {
+    mocks.records = [organizationOrder(5, 'Private Lab')]
+    mocks.showInternalIds = false
+
+    render(
+      <BillingHistoryDialog
+        open
+        onOpenChange={vi.fn()}
+        target='organization'
+        organizationName='Private Lab'
+      />
+    )
+
+    expect(screen.queryByText('User ID: 5')).not.toBeInTheDocument()
+  })
+
+  test('shows user IDs when internal ID visibility is enabled', () => {
+    mocks.records = [organizationOrder(6, 'Visible Lab')]
+
+    render(
+      <BillingHistoryDialog
+        open
+        onOpenChange={vi.fn()}
+        target='organization'
+        organizationName='Visible Lab'
+      />
+    )
+
+    expect(screen.getByText('User ID: 6')).toBeVisible()
   })
 })

@@ -94,6 +94,9 @@ var auditRouteActions = map[string]string{
 
 	// 日志
 	"POST /api/system-task/log-cleanup": "log.cleanup_start",
+
+	// ZeusZS deployment
+	"POST /api/zeuszs/update": "zeuszs.update_trigger",
 }
 
 // beginAdminAudit 在管理/root 写操作进入 handler 前包装 ResponseWriter，

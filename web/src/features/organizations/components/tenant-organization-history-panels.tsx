@@ -39,6 +39,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useIdVisibility } from '@/hooks/use-id-visibility'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
 
 import {
@@ -63,6 +64,7 @@ function HistorySkeleton() {
 
 export function TenantOrganizationLedgerPanel() {
   const { t } = useTranslation()
+  const showInternalIds = useIdVisibility()
   const [page, setPage] = useState(1)
   const params = { page, pageSize: PAGE_SIZE }
   const ledgerQuery = useQuery({
@@ -101,7 +103,7 @@ export function TenantOrganizationLedgerPanel() {
                 <TableRow>
                   <TableHead>{t('Time')}</TableHead>
                   <TableHead>{t('Operation')}</TableHead>
-                  <TableHead>{t('Member ID')}</TableHead>
+                  {showInternalIds && <TableHead>{t('Member ID')}</TableHead>}
                   <TableHead>{t('User quota change')}</TableHead>
                   <TableHead>{t('Pool quota change')}</TableHead>
                   <TableHead>{t('Status')}</TableHead>
@@ -116,7 +118,7 @@ export function TenantOrganizationLedgerPanel() {
                     <TableCell>
                       <code>{entry.operation}</code>
                     </TableCell>
-                    <TableCell>{entry.user_id}</TableCell>
+                    {showInternalIds && <TableCell>{entry.user_id}</TableCell>}
                     <TableCell>{formatQuota(entry.user_quota_delta)}</TableCell>
                     <TableCell>{formatQuota(entry.pool_quota_delta)}</TableCell>
                     <TableCell>
@@ -142,6 +144,7 @@ export function TenantOrganizationLedgerPanel() {
 
 export function TenantOrganizationAuditPanel() {
   const { t } = useTranslation()
+  const showInternalIds = useIdVisibility()
   const [page, setPage] = useState(1)
   const params = { page, pageSize: PAGE_SIZE }
   const auditQuery = useQuery({
@@ -180,8 +183,12 @@ export function TenantOrganizationAuditPanel() {
                 <TableRow>
                   <TableHead>{t('Time')}</TableHead>
                   <TableHead>{t('Action')}</TableHead>
-                  <TableHead>{t('Actor user ID')}</TableHead>
-                  <TableHead>{t('Initiator user ID')}</TableHead>
+                  {showInternalIds && (
+                    <TableHead>{t('Actor user ID')}</TableHead>
+                  )}
+                  {showInternalIds && (
+                    <TableHead>{t('Initiator user ID')}</TableHead>
+                  )}
                   <TableHead>{t('Target')}</TableHead>
                   <TableHead>{t('Request ID')}</TableHead>
                 </TableRow>
@@ -195,11 +202,17 @@ export function TenantOrganizationAuditPanel() {
                     <TableCell>
                       <code>{entry.action}</code>
                     </TableCell>
-                    <TableCell>{entry.actor_user_id}</TableCell>
-                    <TableCell>{entry.initiator_user_id ?? '-'}</TableCell>
+                    {showInternalIds && (
+                      <TableCell>{entry.actor_user_id}</TableCell>
+                    )}
+                    {showInternalIds && (
+                      <TableCell>{entry.initiator_user_id ?? '-'}</TableCell>
+                    )}
                     <TableCell>
                       <span className='inline-block max-w-48 truncate align-middle'>
-                        {entry.target_type}:{entry.target_id}
+                        {showInternalIds
+                          ? `${entry.target_type}:${entry.target_id}`
+                          : entry.target_type}
                       </span>
                     </TableCell>
                     <TableCell>

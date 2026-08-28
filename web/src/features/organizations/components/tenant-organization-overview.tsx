@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useTranslation } from 'react-i18next'
 
 import { Badge } from '@/components/ui/badge'
+import { useIdVisibility } from '@/hooks/use-id-visibility'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
 
 import type { TenantOrganizationSummary } from '../types'
@@ -32,6 +33,7 @@ export function TenantOrganizationOverview(props: {
   summary: TenantOrganizationSummary
 }) {
   const { t } = useTranslation()
+  const showInternalIds = useIdVisibility()
   const canManage =
     props.summary.current_user_role === 'owner' ||
     props.summary.current_user_role === 'admin'
@@ -43,11 +45,13 @@ export function TenantOrganizationOverview(props: {
           <h3 className='truncate text-base font-semibold'>
             {props.summary.name}
           </h3>
-          <p className='text-muted-foreground mt-1 text-sm'>
-            {t('Organization ID: {{id}}', {
-              id: props.summary.organization_id,
-            })}
-          </p>
+          {showInternalIds && (
+            <p className='text-muted-foreground mt-1 text-sm'>
+              {t('Organization ID: {{id}}', {
+                id: props.summary.organization_id,
+              })}
+            </p>
+          )}
         </div>
         <OrganizationStatusBadge status={props.summary.status} />
       </div>

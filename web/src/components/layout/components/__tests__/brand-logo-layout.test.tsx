@@ -17,8 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { render, screen } from '@testing-library/react'
+import i18next from 'i18next'
 import type React from 'react'
-import { describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+
+import zhCN from '@/i18n/locales/zh.json'
 
 import { HeaderLogo } from '../header-logo'
 import { SystemBrand } from '../system-brand'
@@ -37,6 +40,14 @@ vi.mock('@/hooks/use-system-config', () => ({
     systemName: 'Deployment',
   }),
 }))
+
+afterEach(async () => {
+  await i18next.changeLanguage('en')
+})
+
+beforeEach(async () => {
+  await i18next.changeLanguage('en')
+})
 
 describe('brand logo layout', () => {
   test('keeps the deployment logo visible and the main brand independently prominent', () => {
@@ -61,24 +72,33 @@ describe('brand logo layout', () => {
       <SystemBrand
         variant='inline'
         organization={{
-          name: 'Example Organization With A Very Long Display Name',
+          name: '雷霆课题组',
           is_default: false,
         }}
       />
     )
 
-    const organization = screen.getByText(
-      'for Example Organization With A Very Long Display Name'
-    )
+    const organization = screen.getByText('for ltktz')
     expect(organization).toHaveAttribute(
       'data-slot',
       'system-brand-organization'
     )
     expect(organization).toHaveClass('min-w-0', 'truncate', 'text-xs')
-    expect(organization).toHaveAttribute(
-      'title',
-      'for Example Organization With A Very Long Display Name'
+    expect(organization).toHaveAttribute('title', 'for ltktz')
+  })
+
+  test('uses the readable organization name with the English for connector in Chinese', async () => {
+    i18next.addResourceBundle('zhCN', 'translation', zhCN.translation)
+    await i18next.changeLanguage('zhCN')
+
+    render(
+      <SystemBrand
+        variant='inline'
+        organization={{ name: '雷霆课题组', is_default: false }}
+      />
     )
+
+    expect(screen.getByText('for 雷霆课题组')).toBeVisible()
   })
 
   test.each([

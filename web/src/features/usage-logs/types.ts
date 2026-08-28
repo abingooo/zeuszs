@@ -29,7 +29,7 @@ import type { UsageLog } from './data/schema'
 /**
  * Log category for different log types
  */
-export type LogCategory = 'common' | 'drawing' | 'task'
+export type LogCategory = 'common' | 'drawing' | 'task' | 'organization'
 
 // ============================================================================
 // Filter Types
@@ -72,9 +72,25 @@ export interface TaskLogFilters extends CommonFilters {
 }
 
 /**
+ * Organization audit specific filters
+ */
+export interface OrganizationLogFilters extends CommonFilters {
+  action?: string
+  organizationId?: string
+  actorUserId?: string
+  targetType?: string
+  targetId?: string
+  requestId?: string
+}
+
+/**
  * Union type for all log filters
  */
-export type LogFilters = CommonLogFilters | DrawingLogFilters | TaskLogFilters
+export type LogFilters =
+  | CommonLogFilters
+  | DrawingLogFilters
+  | TaskLogFilters
+  | OrganizationLogFilters
 
 // ============================================================================
 // Common Logs Additional Types
@@ -309,6 +325,27 @@ export interface TaskLog {
 }
 
 // ============================================================================
+// Organization Audit Log Types
+// ============================================================================
+
+export interface OrganizationUsageLog {
+  id: number
+  organization_id?: number
+  organization_name: string
+  actor_user_id?: number
+  actor_username: string
+  initiator_user_id?: number
+  initiator_username?: string
+  action: string
+  target_type: string
+  target_id?: string
+  target_name?: string
+  request_id: string
+  metadata: Record<string, unknown> | null
+  created_at: number
+}
+
+// ============================================================================
 // Common Log Types
 // ============================================================================
 
@@ -332,7 +369,7 @@ export interface GetLogsResponse {
   success: boolean
   message?: string
   data?: {
-    items: UsageLog[] | MidjourneyLog[] | TaskLog[]
+    items: UsageLog[] | MidjourneyLog[] | TaskLog[] | OrganizationUsageLog[]
     total: number
     page: number
     page_size: number
@@ -381,6 +418,23 @@ export interface GetTaskLogsParams {
   page_size?: number
   channel_id?: string
   task_id?: string
+  start_timestamp?: number
+  end_timestamp?: number
+}
+
+// ============================================================================
+// Organization Audit Log Types
+// ============================================================================
+
+export interface GetOrganizationLogsParams {
+  p?: number
+  page_size?: number
+  organization_id?: number
+  actor_user_id?: number
+  action?: string
+  target_type?: string
+  target_id?: string
+  request_id?: string
   start_timestamp?: number
   end_timestamp?: number
 }

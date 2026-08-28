@@ -27,6 +27,7 @@ import {
 import type { TenantOrganizationSummary } from '@/features/organizations/types'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
+import { getOrganizationDisplayName } from '@/lib/organization-name'
 import { cn } from '@/lib/utils'
 
 type SystemBrandProps = {
@@ -48,7 +49,7 @@ type SystemBrandProps = {
  * - sidebar: stacked card in the sidebar header (display only)
  */
 export function SystemBrand(props: SystemBrandProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { status } = useStatus()
   const { logo, systemName } = useSystemConfig()
 
@@ -58,8 +59,14 @@ export function SystemBrand(props: SystemBrandProps) {
     props.organization?.is_default === false
       ? props.organization.name.trim()
       : ''
-  const organizationLabel = organizationName
-    ? t('for {{organization}}', { organization: organizationName })
+  const organizationDisplayName = organizationName
+    ? getOrganizationDisplayName(
+        organizationName,
+        i18n.resolvedLanguage || i18n.language
+      )
+    : ''
+  const organizationLabel = organizationDisplayName
+    ? t('for {{organization}}', { organization: organizationDisplayName })
     : ''
   const version =
     status?.version || props.defaultVersion || t('Unknown version')

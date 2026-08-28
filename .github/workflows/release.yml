@@ -2,6 +2,10 @@ name: Release (Linux, macOS, Windows)
 permissions:
   contents: write
 
+env:
+  BUN_VERSION: '1.3.7'
+  GO_VERSION: '1.25.6'
+
 on:
   workflow_dispatch:
     inputs:
@@ -22,13 +26,22 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Determine Version
         run: |
-          VERSION=$(git describe --tags)
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="$GITHUB_REF_NAME"
+            if [[ ! "$VERSION" =~ ^zeuszs-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "Refusing to publish non-stable ZeusZS tag: $VERSION" >&2
+              exit 1
+            fi
+          else
+            VERSION=$(git describe --tags)
+          fi
           echo "VERSION=$VERSION" >> $GITHUB_ENV
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
       - name: Build Frontend
         env:
           CI: ""
@@ -40,21 +53,24 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: '>=1.25.1'
+          go-version: ${{ env.GO_VERSION }}
       - name: Build Backend (amd64)
         run: |
           go mod download
           VERSION_PKG=$(go list -f '{{.ImportPath}}' ./common)
           go build -ldflags "-s -w -X 'new-api/common.Version=$VERSION' -X '${VERSION_PKG}.Version=$VERSION' -extldflags '-static'" -o new-api-$VERSION
           env -u VERSION ./new-api-$VERSION --version | grep -Fx "$VERSION"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o zeuszs-updater-linux-amd64-$VERSION ./cmd/zeuszs-updater
+          ./zeuszs-updater-linux-amd64-$VERSION --version | grep -Fx "$VERSION"
       - name: Build Backend (arm64)
         run: |
           sudo apt-get update
           DEBIAN_FRONTEND=noninteractive sudo apt-get install -y gcc-aarch64-linux-gnu
           VERSION_PKG=$(go list -f '{{.ImportPath}}' ./common)
           CC=aarch64-linux-gnu-gcc CGO_ENABLED=1 GOOS=linux GOARCH=arm64 go build -ldflags "-s -w -X 'new-api/common.Version=$VERSION' -X '${VERSION_PKG}.Version=$VERSION' -extldflags '-static'" -o new-api-arm64-$VERSION
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o zeuszs-updater-linux-arm64-$VERSION ./cmd/zeuszs-updater
       - name: Generate checksums
-        run: sha256sum new-api-* > checksums-linux.txt
+        run: sha256sum new-api-* zeuszs-updater-linux-* LICENSE NOTICE THIRD-PARTY-LICENSES.md > checksums-linux.txt
 
       - name: Release
         uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
@@ -62,6 +78,10 @@ jobs:
         with:
           files: |
             new-api-*
+            zeuszs-updater-linux-*
+            LICENSE
+            NOTICE
+            THIRD-PARTY-LICENSES.md
             checksums-linux.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -74,13 +94,22 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Determine Version
         run: |
-          VERSION=$(git describe --tags)
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="$GITHUB_REF_NAME"
+            if [[ ! "$VERSION" =~ ^zeuszs-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "Refusing to publish non-stable ZeusZS tag: $VERSION" >&2
+              exit 1
+            fi
+          else
+            VERSION=$(git describe --tags)
+          fi
           echo "VERSION=$VERSION" >> $GITHUB_ENV
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
       - name: Build Frontend
         env:
           CI: ""
@@ -93,7 +122,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: '>=1.25.1'
+          go-version: ${{ env.GO_VERSION }}
       - name: Build Backend
         run: |
           go mod download
@@ -124,13 +153,22 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Determine Version
         run: |
-          VERSION=$(git describe --tags)
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            VERSION="$GITHUB_REF_NAME"
+            if [[ ! "$VERSION" =~ ^zeuszs-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "Refusing to publish non-stable ZeusZS tag: $VERSION" >&2
+              exit 1
+            fi
+          else
+            VERSION=$(git describe --tags)
+          fi
           echo "VERSION=$VERSION" >> $GITHUB_ENV
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: ${{ env.BUN_VERSION }}
       - name: Build Frontend
         env:
           CI: ""
@@ -142,7 +180,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version: '>=1.25.1'
+          go-version: ${{ env.GO_VERSION }}
       - name: Build Backend
         run: |
           go mod download

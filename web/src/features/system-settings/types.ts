@@ -368,6 +368,10 @@ export type OperationsSettings = {
   'perf_metrics_setting.retention_days': number
 }
 
+export type CustomSettings = {
+  'custom_setting.id_visibility_enabled': boolean
+}
+
 export type SecuritySettings = {
   ModelRequestRateLimitEnabled: boolean
   ModelRequestRateLimitCount: number

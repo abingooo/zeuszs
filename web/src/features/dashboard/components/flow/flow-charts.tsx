@@ -84,6 +84,7 @@ import type {
   FlowOverflowMode,
   FlowRole,
 } from '@/features/dashboard/types'
+import { useIdVisibility } from '@/hooks/use-id-visibility'
 import { formatQuota } from '@/lib/format'
 import { ROLE } from '@/lib/roles'
 import { computeTimeRange } from '@/lib/time'
@@ -257,6 +258,7 @@ export function FlowCharts(props: FlowChartsProps) {
   const { resolvedTheme, themeReady } = useChartTheme()
   const chartInstanceRef = useRef<IVChart | null>(null)
   const user = useAuthStore((state) => state.auth.user)
+  const showInternalIds = useIdVisibility()
   const isRoot = Boolean(user?.role && user.role >= ROLE.SUPER_ADMIN)
   const isAdmin = Boolean(user?.role && user.role >= ROLE.ADMIN)
   let flowRole: FlowRole = 'user'
@@ -354,6 +356,7 @@ export function FlowCharts(props: FlowChartsProps) {
         visibleStages,
         topNodeLimit,
         overflowMode,
+        showInternalIds,
         maskSensitive,
         deletedTokenLabel: (tokenId) => t('Deleted ({{id}})', { id: tokenId }),
         otherNodeLabel: (kind) => t(FLOW_OTHER_NODE_LABEL_KEYS[kind]),
@@ -370,6 +373,7 @@ export function FlowCharts(props: FlowChartsProps) {
       selectedUsers,
       topNodeLimit,
       visibleStages,
+      showInternalIds,
       maskSensitive,
       t,
     ]

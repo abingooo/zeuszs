@@ -69,6 +69,7 @@ type FlowNodeRank = {
 
 type FlowPathContext = {
   deletedTokenLabel?: (tokenId: number) => string
+  showInternalIds?: boolean
 }
 
 type FlowGraphOptions = {
@@ -167,11 +168,18 @@ function metricValue(metrics: FlowMetrics, metric: FlowMetric): number {
   return metrics.quota
 }
 
-function userNode(row: FlowQuotaDataItem): FlowPathNode {
+function userNode(
+  row: FlowQuotaDataItem,
+  ctx: FlowPathContext = EMPTY_FLOW_PATH_CONTEXT
+): FlowPathNode {
   const userID = numberValue(row.user_id)
   return {
     id: userID > 0 ? `user:${userID}` : `user:${row.username || 'unknown'}`,
-    label: row.username || (userID > 0 ? `user-${userID}` : 'Unknown User'),
+    label:
+      row.username ||
+      (userID > 0 && ctx.showInternalIds !== false
+        ? `user-${userID}`
+        : 'Unknown User'),
     kind: 'user',
   }
 }
@@ -837,7 +845,8 @@ function formatNumber(value: number): string {
 function buildUserFilterOptions(
   rows: FlowQuotaDataItem[],
   metric: FlowMetric = 'quota',
-  palette?: readonly string[]
+  palette?: readonly string[],
+  ctx: FlowPathContext = EMPTY_FLOW_PATH_CONTEXT
 ): FlowFilterOptions['users'] {
   const users = new Map<
     string,
@@ -848,12 +857,12 @@ function buildUserFilterOptions(
     }
   >()
   const colors = stableColorMap(
-    rows.map((row) => userNode(row).id).sort((a, b) => a.localeCompare(b)),
+    rows.map((row) => userNode(row, ctx).id).sort((a, b) => a.localeCompare(b)),
     palette
   )
 
   for (const row of rows) {
-    const user = userNode(row)
+    const user = userNode(row, ctx)
     if (!row.user_id && !row.username) continue
     const metrics = rowMetrics(row)
     const value = metricValue(metrics, metric)
@@ -978,6 +987,7 @@ export function buildDashboardFlowData(
   const palette = options.colorPalette
   const ctx = {
     deletedTokenLabel: options.deletedTokenLabel,
+    showInternalIds: options.showInternalIds,
   }
   const stages = resolveVisibleStages(role, options.visibleStages)
   const userFilteredRows = filterRows(rows, options)
@@ -1007,7 +1017,7 @@ export function buildDashboardFlowData(
       }
     ),
     filterOptions: {
-      users: buildUserFilterOptions(rows, metric, palette),
+      users: buildUserFilterOptions(rows, metric, palette, ctx),
       nodes: buildNodeFilterOptions(
         userFilteredRows,
         metric,

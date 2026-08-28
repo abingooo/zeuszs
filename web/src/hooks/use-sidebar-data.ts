@@ -27,6 +27,7 @@ import {
   LayoutDashboard,
   ListTodo,
   Radio,
+  RefreshCcw,
   ServerCog,
   Settings,
   Ticket,
@@ -38,6 +39,7 @@ import { createElement } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { SidebarData } from '@/components/layout/types'
+import { canAccessOrganizationLogs } from '@/features/usage-logs/lib/organization-log-access'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -59,6 +61,9 @@ export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
   const organizationRole = useAuthStore(
     (state) => state.auth.user?.organization_role
+  )
+  const showOrganizationLogs = useAuthStore((state) =>
+    canAccessOrganizationLogs(state.auth.user)
   )
   const organizationTitle =
     organizationRole === 'owner' || organizationRole === 'admin'
@@ -91,6 +96,15 @@ export function useSidebarData(): SidebarData {
             url: '/usage-logs/common',
             icon: FileText,
           },
+          ...(showOrganizationLogs
+            ? [
+                {
+                  title: t('Organization Logs'),
+                  url: '/usage-logs/organization',
+                  icon: OrganizationsNavIcon,
+                },
+              ]
+            : []),
           {
             title: t('Task Logs'),
             url: '/usage-logs/task',
@@ -160,6 +174,12 @@ export function useSidebarData(): SidebarData {
             url: '/system-info',
             icon: ServerCog,
             requiredRole: ROLE.SUPER_ADMIN,
+          },
+          {
+            title: t('Platform Update'),
+            url: '/platform-update',
+            icon: RefreshCcw,
+            requiredRole: ROLE.ADMIN,
           },
           {
             title: t('System Settings'),

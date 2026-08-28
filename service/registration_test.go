@@ -127,6 +127,31 @@ func TestRegisterUserClaimsOrganizationInviteAndCreatesAuditedWallet(t *testing.
 	var inviteUse model.OrganizationInviteUse
 	require.NoError(t, db.Where("user_id = ?", registration.User.Id).First(&inviteUse).Error)
 	assert.Equal(t, invitedOrganization.Id, inviteUse.OrganizationId)
+	var joinAudit model.OrganizationAuditEvent
+	require.NoError(t, db.Where(
+		"organization_id = ? AND action = ? AND target_type = ? AND target_id = ?",
+		invitedOrganization.Id,
+		"organization.member.join",
+		"user",
+		strconv.Itoa(registration.User.Id),
+	).First(&joinAudit).Error)
+	assert.Equal(t, registration.User.Id, joinAudit.ActorUserId)
+	assert.Equal(t, "registration-request-1", joinAudit.RequestId)
+	var joinMetadata map[string]interface{}
+	require.NoError(t, common.UnmarshalJsonStr(joinAudit.Metadata, &joinMetadata))
+	assert.Equal(t, string(model.OrganizationRoleMember), joinMetadata["organization_role"])
+	assert.Equal(t, invite.CodePrefix, joinMetadata["code_prefix"])
+	assert.Len(t, joinMetadata, 2)
+	assert.NotContains(t, joinAudit.Metadata, invite.CodeHash)
+	assert.NotContains(t, joinAudit.Metadata, "LAB-ACCESS")
+
+	usageLogs, err := ListOrganizationUsageLogs(registration.User.Id, ListOrganizationUsageLogsParams{Limit: 10})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), usageLogs.Total)
+	require.Len(t, usageLogs.Items, 1)
+	assert.Equal(t, "organization.member.join", usageLogs.Items[0].Action)
+	assert.Equal(t, registration.User.Username, usageLogs.Items[0].ActorUsername)
+	assert.Equal(t, registration.User.Username, usageLogs.Items[0].TargetName)
 
 	var ledger model.OrganizationQuotaLedger
 	require.NoError(t, db.Where("idempotency_key = ?", "registration:"+strconv.Itoa(registration.User.Id)+":initial").First(&ledger).Error)
@@ -362,6 +387,45 @@ func TestRegisterUserRollsBackAllPersistentStateWhenProviderBindingFails(t *test
 		require.NoError(t, db.Model(table).Count(&count).Error)
 		assert.Zero(t, count)
 	}
+}
+
+func TestRegisterUserRollsBackOrganizationJoinAuditWithInviteClaim(t *testing.T) {
+	db := setupRegistrationTestDB(t)
+	defaultKey := model.DefaultOrganizationSystemKey
+	_ = createRegistrationTestOrganization(t, db, "Default", &defaultKey, 100)
+	organization := createRegistrationTestOrganization(t, db, "Rollback Invite", nil, 200)
+	invite := model.OrganizationInvite{
+		OrganizationId: organization.Id, CodeHash: HashOrganizationInviteCode("ROLLBACK-JOIN"),
+		CodePrefix: "ROLLBACK", Status: model.OrganizationInviteStatusActive,
+		MaxUses: 1, DefaultRole: model.OrganizationRoleMember, CreatedBy: 200,
+	}
+	require.NoError(t, db.Create(&invite).Error)
+
+	expected := errors.New("rollback invited registration")
+	_, err := RegisterUser(UserRegistrationParams{
+		User: &model.User{
+			Username: "rollback-invitee", Password: "password123",
+			Role: common.RoleCommonUser, Status: common.UserStatusEnabled,
+		},
+		OrganizationInviteCode: "ROLLBACK-JOIN",
+		RequestID:              "registration-join-rollback",
+		AfterCreateTx: func(_ *gorm.DB, _ *model.User) error {
+			return expected
+		},
+	})
+	require.ErrorIs(t, err, expected)
+
+	var userCount, inviteUseCount, joinAuditCount int64
+	require.NoError(t, db.Model(&model.User{}).Where("username = ?", "rollback-invitee").Count(&userCount).Error)
+	require.NoError(t, db.Model(&model.OrganizationInviteUse{}).Where("organization_invite_id = ?", invite.Id).Count(&inviteUseCount).Error)
+	require.NoError(t, db.Model(&model.OrganizationAuditEvent{}).Where("action = ?", "organization.member.join").Count(&joinAuditCount).Error)
+	assert.Zero(t, userCount)
+	assert.Zero(t, inviteUseCount)
+	assert.Zero(t, joinAuditCount)
+
+	var persistedInvite model.OrganizationInvite
+	require.NoError(t, db.First(&persistedInvite, invite.Id).Error)
+	assert.Zero(t, persistedInvite.UsedCount)
 }
 
 func TestProvisionRootUserWithTxCreatesOrganizationAndAuditedWallet(t *testing.T) {

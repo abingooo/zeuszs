@@ -25,6 +25,7 @@ import type {
   LogFilters,
   CommonLogFilters,
   DrawingLogFilters,
+  OrganizationLogFilters,
   TaskLogFilters,
 } from '../types'
 
@@ -75,6 +76,30 @@ export function buildSearchParams(
       return {
         ...baseParams,
         ...(taskFilters.taskId && { filter: taskFilters.taskId }),
+      }
+    }
+    case 'organization': {
+      const organizationFilters = filters as OrganizationLogFilters
+      return {
+        ...baseParams,
+        ...(organizationFilters.action && {
+          action: organizationFilters.action,
+        }),
+        ...(organizationFilters.organizationId && {
+          organizationId: organizationFilters.organizationId,
+        }),
+        ...(organizationFilters.actorUserId && {
+          actorUserId: organizationFilters.actorUserId,
+        }),
+        ...(organizationFilters.targetType && {
+          targetType: organizationFilters.targetType,
+        }),
+        ...(organizationFilters.targetId && {
+          targetId: organizationFilters.targetId,
+        }),
+        ...(organizationFilters.requestId && {
+          requestId: organizationFilters.requestId,
+        }),
       }
     }
     default:

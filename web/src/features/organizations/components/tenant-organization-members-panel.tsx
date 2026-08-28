@@ -80,6 +80,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useIdVisibility } from '@/hooks/use-id-visibility'
 import { formatQuota } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 
@@ -118,6 +119,7 @@ export function TenantOrganizationMembersPanel(props: {
   summary: TenantOrganizationSummary
 }) {
   const { t } = useTranslation()
+  const showInternalIds = useIdVisibility()
   const queryClient = useQueryClient()
   const [page, setPage] = useState(1)
   const [searchInput, setSearchInput] = useState('')
@@ -160,7 +162,7 @@ export function TenantOrganizationMembersPanel(props: {
       })
       setConfirmation(null)
       toast.success(
-        t('{{count}} member API keys disabled', {
+        t('{{count}} API keys disabled', {
           count: result.disabled_token_count,
         })
       )
@@ -262,8 +264,10 @@ export function TenantOrganizationMembersPanel(props: {
                             {member.display_name || member.username}
                           </span>
                           <span className='text-muted-foreground truncate text-xs'>
-                            @{member.username} -{' '}
-                            {t('ID: {{id}}', { id: member.user_id })}
+                            @{member.username}
+                            {showInternalIds && (
+                              <> - {t('ID: {{id}}', { id: member.user_id })}</>
+                            )}
                           </span>
                         </div>
                       </TableCell>

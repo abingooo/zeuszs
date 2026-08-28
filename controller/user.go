@@ -18,6 +18,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
+	"github.com/QuantumNous/new-api/setting/custom_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
 	"github.com/QuantumNous/new-api/constant"
@@ -534,7 +535,10 @@ func buildSelfUserData(user *model.User) map[string]interface{} {
 
 // 计算用户权限的辅助函数
 func calculateUserPermissions(userRole int) map[string]interface{} {
-	permissions := map[string]interface{}{}
+	isPlatformAdministrator := userRole == common.RoleAdminUser || userRole == common.RoleRootUser
+	permissions := map[string]interface{}{
+		"id_visible": isPlatformAdministrator || custom_setting.IsIDVisibilityEnabled(),
+	}
 
 	// 根据用户角色计算权限
 	if userRole == common.RoleRootUser {

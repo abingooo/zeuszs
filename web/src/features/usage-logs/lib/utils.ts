@@ -23,6 +23,7 @@ import {
   getAllLogs,
   getUserLogs,
   getAllMidjourneyLogs,
+  getOrganizationLogs,
   getUserMidjourneyLogs,
   getAllTaskLogs,
   getUserTaskLogs,
@@ -37,6 +38,7 @@ import type {
   GetLogsResponse,
   FetchLogsConfig,
   GetMidjourneyLogsParams,
+  GetOrganizationLogsParams,
   GetTaskLogsParams,
 } from '../types'
 
@@ -49,6 +51,41 @@ import type {
  */
 export function isDisplayableLogType(type: number): boolean {
   return (DISPLAYABLE_LOG_TYPES as readonly number[]).includes(type)
+}
+
+/**
+ * Build organization audit parameters. Tenant users never send entity-ID
+ * filters because those controls are reserved for platform administrators.
+ */
+export function buildOrganizationApiParams(config: {
+  page: number
+  pageSize: number
+  searchParams: Record<string, unknown>
+  isAdmin: boolean
+}): GetOrganizationLogsParams {
+  const { page, pageSize, searchParams, isAdmin } = config
+
+  return {
+    p: page,
+    page_size: pageSize,
+    ...(searchParams.action ? { action: String(searchParams.action) } : {}),
+    ...(searchParams.requestId
+      ? { request_id: String(searchParams.requestId) }
+      : {}),
+    ...(isAdmin && searchParams.organizationId
+      ? { organization_id: Number(searchParams.organizationId) || 0 }
+      : {}),
+    ...(isAdmin && searchParams.actorUserId
+      ? { actor_user_id: Number(searchParams.actorUserId) || 0 }
+      : {}),
+    ...(isAdmin && searchParams.targetType
+      ? { target_type: String(searchParams.targetType) }
+      : {}),
+    ...(isAdmin && searchParams.targetId
+      ? { target_id: String(searchParams.targetId) }
+      : {}),
+    ...buildTimeRangeParams(searchParams, false),
+  }
 }
 
 /**
@@ -246,6 +283,12 @@ export async function fetchLogsByCategory(
 ): Promise<GetLogsResponse> {
   const { logCategory, isAdmin, page, pageSize, searchParams, columnFilters } =
     config
+
+  if (logCategory === 'organization') {
+    return getOrganizationLogs(
+      buildOrganizationApiParams({ page, pageSize, searchParams, isAdmin })
+    )
+  }
 
   if (logCategory === 'common') {
     const params = buildApiParams({

@@ -24,6 +24,7 @@ import type {
   GetLogStatsParams,
   GetLogStatsResponse,
   GetMidjourneyLogsParams,
+  GetOrganizationLogsParams,
   GetTaskLogsParams,
   UserInfo,
 } from './types'
@@ -121,3 +122,15 @@ export const getAllTaskLogs = (params: GetTaskLogsParams) =>
 
 export const getUserTaskLogs = (params: GetTaskLogsParams) =>
   fetchLogs('/api/task', params, false)
+
+// ============================================================================
+// Organization Audit Log API
+// ============================================================================
+
+export async function getOrganizationLogs(
+  params: GetOrganizationLogsParams
+): Promise<GetLogsResponse> {
+  const queryParams = buildQueryParams(params as Record<string, unknown>)
+  const res = await api.get(`/api/organization/logs?${queryParams}`)
+  return res.data
+}

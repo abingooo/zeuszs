@@ -18,7 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, test, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { TenantOrganizationAuditPanel } from '../tenant-organization-history-panels'
 
@@ -45,6 +48,11 @@ vi.mock('../pagination-controls', () => ({
 }))
 
 beforeEach(() => {
+  useAuthStore.getState().auth.setUser({
+    id: 1,
+    username: 'platform-admin',
+    role: ROLE.ADMIN,
+  })
   vi.mocked(useQuery).mockReturnValue({
     data: {
       items: [
@@ -69,6 +77,10 @@ beforeEach(() => {
   } as never)
 })
 
+afterEach(() => {
+  useAuthStore.getState().auth.reset('idle')
+})
+
 describe('organization audit initiator', () => {
   test('shows the payer separately from the system accounting actor', () => {
     render(<TenantOrganizationAuditPanel />)
@@ -77,5 +89,26 @@ describe('organization audit initiator', () => {
     expect(screen.getByText('Initiator user ID')).toBeVisible()
     expect(screen.getByText('0')).toBeVisible()
     expect(screen.getByText('42')).toBeVisible()
+  })
+
+  test('hides actor, initiator, and target IDs for ordinary members', () => {
+    useAuthStore.getState().auth.setUser({
+      id: 7,
+      username: 'member',
+      role: ROLE.USER,
+      organization_id: 7,
+      organization_role: 'member',
+      organization_status: 'active',
+      organization_is_default: false,
+    })
+
+    render(<TenantOrganizationAuditPanel />)
+
+    expect(screen.queryByText('Actor user ID')).not.toBeInTheDocument()
+    expect(screen.queryByText('Initiator user ID')).not.toBeInTheDocument()
+    expect(screen.queryByText('0')).not.toBeInTheDocument()
+    expect(screen.queryByText('42')).not.toBeInTheDocument()
+    expect(screen.getByText('organization')).toBeVisible()
+    expect(screen.queryByText('organization:7')).not.toBeInTheDocument()
   })
 })

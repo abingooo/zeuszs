@@ -19,14 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import type { ColumnDef } from '@tanstack/react-table'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
 
 import {
   DataTablePage,
   DataTableRow,
   useDataTable,
 } from '@/components/data-table'
+import { ErrorState } from '@/components/error-state'
 import { useMediaQuery } from '@/hooks'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import { cn } from '@/lib/utils'
@@ -41,6 +42,7 @@ import { parseLogOther } from '../lib/format'
 import { fetchLogsByCategory } from '../lib/utils'
 import type { LogCategory } from '../types'
 import { CommonLogsFilterBar } from './common-logs-filter-bar'
+import { OrganizationLogsFilterBar } from './organization-logs-filter-bar'
 import { TaskLogsFilterBar } from './task-logs-filter-bar'
 import { UsageLogsMobileList } from './usage-logs-mobile-card'
 import { useLogsViewScope } from './usage-logs-provider'
@@ -79,9 +81,64 @@ interface UsageLogsTableProps {
 
 export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   const { t } = useTranslation()
-  const { isAdminView: isAdmin } = useLogsViewScope()
+  const { canManageScope, isAdminView } = useLogsViewScope()
+  const isAdmin = logCategory === 'organization' ? canManageScope : isAdminView
   const isMobile = useMediaQuery('(max-width: 640px)')
   const searchParams = route.useSearch()
+
+  const commonColumnFilters = [
+    {
+      columnId: 'created_at',
+      searchKey: 'type',
+      type: 'array' as const,
+      deserialize: deserializeLogTypeFilter,
+    },
+    { columnId: 'model_name', searchKey: 'model', type: 'string' as const },
+    { columnId: 'token_name', searchKey: 'token', type: 'string' as const },
+    { columnId: 'group', searchKey: 'group', type: 'string' as const },
+    ...(isAdmin
+      ? [
+          {
+            columnId: 'channel',
+            searchKey: 'channel',
+            type: 'string' as const,
+          },
+          {
+            columnId: 'username',
+            searchKey: 'username',
+            type: 'string' as const,
+          },
+          {
+            columnId: 'organization',
+            searchKey: 'organizationId',
+            type: 'string' as const,
+          },
+        ]
+      : []),
+  ]
+  const organizationColumnFilters = [
+    { columnId: 'action', searchKey: 'action', type: 'string' as const },
+    { columnId: 'request_id', searchKey: 'requestId', type: 'string' as const },
+    ...(isAdmin
+      ? [
+          {
+            columnId: 'organization',
+            searchKey: 'organizationId',
+            type: 'string' as const,
+          },
+          {
+            columnId: 'actor',
+            searchKey: 'actorUserId',
+            type: 'string' as const,
+          },
+          {
+            columnId: 'target',
+            searchKey: 'targetId',
+            type: 'string' as const,
+          },
+        ]
+      : []),
+  ]
 
   const {
     columnFilters,
@@ -94,39 +151,13 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     navigate: route.useNavigate(),
     pagination: { defaultPage: 1, defaultPageSize: isMobile ? 20 : 100 },
     globalFilter: { enabled: false },
-    columnFilters: [
-      {
-        columnId: 'created_at',
-        searchKey: 'type',
-        type: 'array' as const,
-        deserialize: deserializeLogTypeFilter,
-      },
-      { columnId: 'model_name', searchKey: 'model', type: 'string' as const },
-      { columnId: 'token_name', searchKey: 'token', type: 'string' as const },
-      { columnId: 'group', searchKey: 'group', type: 'string' as const },
-      ...(isAdmin
-        ? [
-            {
-              columnId: 'channel',
-              searchKey: 'channel',
-              type: 'string' as const,
-            },
-            {
-              columnId: 'username',
-              searchKey: 'username',
-              type: 'string' as const,
-            },
-            {
-              columnId: 'organization',
-              searchKey: 'organizationId',
-              type: 'string' as const,
-            },
-          ]
-        : []),
-    ],
+    columnFilters:
+      logCategory === 'organization'
+        ? organizationColumnFilters
+        : commonColumnFilters,
   })
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: [
       'logs',
       logCategory,
@@ -148,8 +179,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       })
 
       if (!result?.success) {
-        toast.error(result?.message || t('Failed to load logs'))
-        return DEFAULT_LOGS_DATA
+        throw new Error(result?.message || t('Failed to load logs'))
       }
 
       return result.data || DEFAULT_LOGS_DATA
@@ -185,6 +215,42 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   })
 
   const isCommon = logCategory === 'common'
+  const isOrganization = logCategory === 'organization'
+  const emptyTitle = isOrganization
+    ? t('No Organization Logs Found')
+    : t('No Logs Found')
+  const emptyDescription = isOrganization
+    ? t(
+        'Organization operations such as top-ups and quota transfers will appear here.'
+      )
+    : t(
+        'No usage logs available. Logs will appear here once API calls are made.'
+      )
+
+  let toolbar: ReactNode = null
+  if (logCategory === 'drawing' || logCategory === 'task') {
+    toolbar = <TaskLogsFilterBar table={table} logCategory={logCategory} />
+  }
+  if (isCommon) {
+    toolbar = <CommonLogsFilterBar table={table} />
+  }
+  if (isOrganization) {
+    toolbar = <OrganizationLogsFilterBar table={table} />
+  }
+
+  if (isError) {
+    return (
+      <div className='flex h-full min-h-0 flex-col gap-3'>
+        {toolbar}
+        <ErrorState
+          title={t('Failed to load logs')}
+          description={t('Please try again later.')}
+          onRetry={() => void refetch()}
+          className='min-h-0 flex-1'
+        />
+      </div>
+    )
+  }
 
   return (
     <DataTablePage
@@ -192,10 +258,8 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       columns={columns as ColumnDef<Record<string, unknown>>[]}
       isLoading={isLoadingData}
       isFetching={isFetching}
-      emptyTitle={t('No Logs Found')}
-      emptyDescription={t(
-        'No usage logs available. Logs will appear here once API calls are made.'
-      )}
+      emptyTitle={emptyTitle}
+      emptyDescription={emptyDescription}
       skeletonKeyPrefix='usage-log-skeleton'
       applyHeaderSize
       tableClassName={cn(
@@ -206,15 +270,11 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
           table={table}
           isLoading={isLoadingData}
           logCategory={logCategory}
+          emptyTitle={emptyTitle}
+          emptyDescription={emptyDescription}
         />
       }
-      toolbar={
-        isCommon ? (
-          <CommonLogsFilterBar table={table} />
-        ) : (
-          <TaskLogsFilterBar table={table} logCategory={logCategory} />
-        )
-      }
+      toolbar={toolbar}
       renderRow={(row) => {
         const logType = (row.original as Record<string, unknown>).type as
           | number

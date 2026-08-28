@@ -20,10 +20,12 @@ import { createFileRoute, redirect } from '@tanstack/react-router'
 import z from 'zod'
 
 import { UsageLogs } from '@/features/usage-logs'
+import { canAccessOrganizationLogs } from '@/features/usage-logs/lib/organization-log-access'
 import {
   isUsageLogsSectionId,
   USAGE_LOGS_DEFAULT_SECTION,
 } from '@/features/usage-logs/section-registry'
+import { useAuthStore } from '@/stores/auth-store'
 
 const logTypeValues = ['0', '1', '2', '3', '4', '5', '6', '7'] as const
 const logTypeSearchSchema = z
@@ -44,6 +46,10 @@ const usageLogsSearchSchema = z.object({
   group: z.string().optional().catch(''),
   username: z.string().optional().catch(''),
   organizationId: z.string().optional().catch(''),
+  actorUserId: z.string().optional().catch(''),
+  action: z.string().optional().catch(''),
+  targetType: z.string().optional().catch(''),
+  targetId: z.string().optional().catch(''),
   requestId: z.string().optional().catch(''),
   upstreamRequestId: z.string().optional().catch(''),
   startTime: z.number().optional(),
@@ -53,6 +59,15 @@ const usageLogsSearchSchema = z.object({
 export const Route = createFileRoute('/_authenticated/usage-logs/$section')({
   beforeLoad: ({ params, search }) => {
     if (!isUsageLogsSectionId(params.section)) {
+      throw redirect({
+        to: '/usage-logs/$section',
+        params: { section: USAGE_LOGS_DEFAULT_SECTION },
+      })
+    }
+    if (
+      params.section === 'organization' &&
+      !canAccessOrganizationLogs(useAuthStore.getState().auth.user)
+    ) {
       throw redirect({
         to: '/usage-logs/$section',
         params: { section: USAGE_LOGS_DEFAULT_SECTION },

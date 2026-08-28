@@ -448,6 +448,41 @@ function DrawingLogsCard<TData>({
   )
 }
 
+function OrganizationLogsCard<TData>({
+  cells,
+}: {
+  cells: Map<string, Cell<TData, unknown>>
+}) {
+  const { t } = useTranslation()
+
+  return (
+    <div className='space-y-2.5'>
+      <div className='flex min-w-0 items-start justify-between gap-3'>
+        <CompactCell cell={cells.get('action')} className='min-w-0 flex-1' />
+        <CompactCell
+          cell={cells.get('created_at')}
+          className='shrink-0 text-right'
+        />
+      </div>
+
+      <div className='grid grid-cols-2 gap-1.5'>
+        <SummaryField
+          label={t('Organization')}
+          cell={cells.get('organization')}
+        />
+        <SummaryField label={t('Operator')} cell={cells.get('actor')} />
+        <SummaryField label={t('Target')} cell={cells.get('target')} />
+        <SummaryField label={t('Request ID')} cell={cells.get('request_id')} />
+        <SummaryField
+          label={t('Details')}
+          cell={cells.get('details')}
+          className='col-span-2 bg-transparent px-0 py-0'
+        />
+      </div>
+    </div>
+  )
+}
+
 export function UsageLogsMobileList<TData>({
   table,
   isLoading = false,
@@ -507,6 +542,9 @@ export function UsageLogsMobileList<TData>({
             {logCategory === 'common' && <CommonLogsCard cells={cells} />}
             {logCategory === 'task' && <TaskLogsCard cells={cells} />}
             {logCategory === 'drawing' && <DrawingLogsCard cells={cells} />}
+            {logCategory === 'organization' && (
+              <OrganizationLogsCard cells={cells} />
+            )}
           </div>
         )
       })}

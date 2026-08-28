@@ -86,6 +86,8 @@ export interface FlowBuildOptions {
   // are partially masked in the rendered graph while keeping node identity so
   // the Sankey shape stays intact.
   maskSensitive?: boolean
+  // Controls whether a missing username may fall back to a numeric user ID.
+  showInternalIds?: boolean
   // Resolves the label for a token whose record no longer exists (deleted).
   // Lets the caller inject a localized string such as "Deleted (123)".
   deletedTokenLabel?: (tokenId: number) => string

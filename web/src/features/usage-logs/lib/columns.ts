@@ -23,6 +23,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 
 import { useCommonLogsColumns } from '../components/columns/common-logs-columns'
 import { useDrawingLogsColumns } from '../components/columns/drawing-logs-columns'
+import { useOrganizationLogsColumns } from '../components/columns/organization-logs-columns'
 import { useTaskLogsColumns } from '../components/columns/task-logs-columns'
 import type { LogCategory } from '../types'
 
@@ -38,6 +39,7 @@ export function useColumnsByCategory(
   const commonColumns = useCommonLogsColumns(isAdmin)
   const drawingColumns = useDrawingLogsColumns(isAdmin)
   const taskColumns = useTaskLogsColumns(isAdmin)
+  const organizationColumns = useOrganizationLogsColumns()
 
   switch (logCategory) {
     case 'common':
@@ -46,6 +48,8 @@ export function useColumnsByCategory(
       return drawingColumns
     case 'task':
       return taskColumns
+    case 'organization':
+      return organizationColumns
     default:
       return commonColumns
   }

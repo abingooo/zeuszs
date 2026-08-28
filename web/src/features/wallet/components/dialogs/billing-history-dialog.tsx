@@ -45,6 +45,7 @@ import {
 } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useCopyToClipboard } from '@/hooks/use-copy-to-clipboard'
+import { useIdVisibility } from '@/hooks/use-id-visibility'
 import { formatCurrencyFromUSD } from '@/lib/currency'
 import { formatNumber } from '@/lib/format'
 
@@ -70,6 +71,7 @@ export function BillingHistoryDialog({
   organizationName,
 }: BillingHistoryDialogProps) {
   const { t } = useTranslation()
+  const showInternalIds = useIdVisibility()
   const {
     records,
     total,
@@ -228,7 +230,7 @@ export function BillingHistoryDialog({
                                 <Copy className='h-3 w-3' />
                               )}
                             </Button>
-                            {isAdmin && record.user_id != null && (
+                            {showInternalIds && record.user_id != null && (
                               <StatusBadge
                                 label={`${t('User ID')}: ${record.user_id}`}
                                 variant='neutral'

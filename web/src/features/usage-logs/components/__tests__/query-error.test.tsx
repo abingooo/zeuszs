@@ -25,7 +25,7 @@ import { UsageLogsTable } from '../usage-logs-table'
 
 vi.mock('@tanstack/react-router', () => ({
   getRouteApi: () => ({
-    useSearch: () => ({}),
+    useSearch: () => ({ type: ['organization'] }),
     useNavigate: () => vi.fn(),
   }),
 }))
@@ -59,11 +59,7 @@ vi.mock('../../lib/utils', () => ({
 }))
 
 vi.mock('../common-logs-filter-bar', () => ({
-  CommonLogsFilterBar: () => null,
-}))
-
-vi.mock('../organization-logs-filter-bar', () => ({
-  OrganizationLogsFilterBar: () => <div>organization filters</div>,
+  CommonLogsFilterBar: () => <div>usage log filters</div>,
 }))
 
 vi.mock('../task-logs-filter-bar', () => ({
@@ -92,13 +88,13 @@ test('shows a retryable error instead of the empty organization-log state', asyn
 
   render(
     <QueryClientProvider client={queryClient}>
-      <UsageLogsTable logCategory='organization' />
+      <UsageLogsTable logCategory='common' />
     </QueryClientProvider>
   )
 
   expect(await screen.findByText('Failed to load logs')).toBeVisible()
   expect(screen.getByText('Please try again later.')).toBeVisible()
-  expect(screen.getByText('organization filters')).toBeVisible()
+  expect(screen.getByText('usage log filters')).toBeVisible()
   expect(screen.queryByText('data table')).not.toBeInTheDocument()
 
   fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
@@ -106,5 +102,8 @@ test('shows a retryable error instead of the empty organization-log state', asyn
   await waitFor(() => {
     expect(fetchLogsByCategory).toHaveBeenCalledTimes(2)
   })
+  expect(fetchLogsByCategory).toHaveBeenCalledWith(
+    expect.objectContaining({ logCategory: 'organization' })
+  )
   queryClient.clear()
 })

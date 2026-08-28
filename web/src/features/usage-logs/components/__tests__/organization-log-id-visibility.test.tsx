@@ -103,10 +103,10 @@ describe('organization log ID visibility', () => {
       const layout = within(screen.getByTestId(testID))
       expect(layout.queryByText('#17')).not.toBeInTheDocument()
       expect(layout.queryByText('alice (#42)')).not.toBeInTheDocument()
-      expect(layout.queryByText('carol (#43)')).not.toBeInTheDocument()
-      expect(layout.queryByText('bob (#88)')).not.toBeInTheDocument()
+      expect(layout.queryByText(/carol/)).not.toBeInTheDocument()
+      expect(layout.queryByText(/bob \(#88\)/)).not.toBeInTheDocument()
       expect(layout.getByText('alice')).toBeVisible()
-      expect(layout.getByText('bob')).toBeVisible()
+      expect(layout.getByText(/^bob ·/)).toBeVisible()
     }
   })
 
@@ -122,8 +122,8 @@ describe('organization log ID visibility', () => {
       const layout = within(screen.getByTestId(testID))
       expect(layout.getByText('#17')).toBeVisible()
       expect(layout.getByText('alice (#42)')).toBeVisible()
-      expect(layout.getByText(/carol \(#43\)/)).toBeVisible()
-      expect(layout.getByText('bob (#88)')).toBeVisible()
+      expect(layout.queryByText(/carol/)).not.toBeInTheDocument()
+      expect(layout.getByText(/^bob \(#88\) ·/)).toBeVisible()
     }
   })
 })

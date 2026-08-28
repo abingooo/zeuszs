@@ -39,7 +39,6 @@ import { createElement } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import type { SidebarData } from '@/components/layout/types'
-import { canAccessOrganizationLogs } from '@/features/usage-logs/lib/organization-log-access'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -61,9 +60,6 @@ export function useSidebarData(): SidebarData {
   const { t } = useTranslation()
   const organizationRole = useAuthStore(
     (state) => state.auth.user?.organization_role
-  )
-  const showOrganizationLogs = useAuthStore((state) =>
-    canAccessOrganizationLogs(state.auth.user)
   )
   const organizationTitle =
     organizationRole === 'owner' || organizationRole === 'admin'
@@ -96,15 +92,6 @@ export function useSidebarData(): SidebarData {
             url: '/usage-logs/common',
             icon: FileText,
           },
-          ...(showOrganizationLogs
-            ? [
-                {
-                  title: t('Organization Logs'),
-                  url: '/usage-logs/organization',
-                  icon: OrganizationsNavIcon,
-                },
-              ]
-            : []),
           {
             title: t('Task Logs'),
             url: '/usage-logs/task',

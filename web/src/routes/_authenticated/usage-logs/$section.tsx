@@ -20,6 +20,10 @@ import { createFileRoute, redirect } from '@tanstack/react-router'
 import z from 'zod'
 
 import { UsageLogs } from '@/features/usage-logs'
+import {
+  LOG_TYPE_ALL_VALUE,
+  ORGANIZATION_LOG_TYPE_VALUE,
+} from '@/features/usage-logs/constants'
 import { canAccessOrganizationLogs } from '@/features/usage-logs/lib/organization-log-access'
 import {
   isUsageLogsSectionId,
@@ -27,12 +31,22 @@ import {
 } from '@/features/usage-logs/section-registry'
 import { useAuthStore } from '@/stores/auth-store'
 
-const logTypeValues = ['0', '1', '2', '3', '4', '5', '6', '7'] as const
+const logTypeValues = [
+  '0',
+  '1',
+  '2',
+  '3',
+  '4',
+  '5',
+  '6',
+  '7',
+  ORGANIZATION_LOG_TYPE_VALUE,
+] as const
 const logTypeSearchSchema = z
   .preprocess((value) => {
     if (value == null || value === '') return undefined
     return Array.isArray(value) ? value : [value]
-  }, z.array(z.enum(logTypeValues)).optional())
+  }, z.array(z.enum(logTypeValues)).max(1).optional())
   .catch([])
 
 const usageLogsSearchSchema = z.object({
@@ -58,19 +72,44 @@ const usageLogsSearchSchema = z.object({
 
 export const Route = createFileRoute('/_authenticated/usage-logs/$section')({
   beforeLoad: ({ params, search }) => {
+    const canAccessOrganization = canAccessOrganizationLogs(
+      useAuthStore.getState().auth.user
+    )
+    if (params.section === 'organization') {
+      throw redirect({
+        to: '/usage-logs/$section',
+        params: { section: USAGE_LOGS_DEFAULT_SECTION },
+        search: {
+          ...search,
+          type: [
+            canAccessOrganization
+              ? ORGANIZATION_LOG_TYPE_VALUE
+              : LOG_TYPE_ALL_VALUE,
+          ],
+        },
+        replace: true,
+      })
+    }
     if (!isUsageLogsSectionId(params.section)) {
       throw redirect({
         to: '/usage-logs/$section',
         params: { section: USAGE_LOGS_DEFAULT_SECTION },
       })
     }
+    const requestsOrganization =
+      Array.isArray(search?.type) &&
+      search.type.length === 1 &&
+      search.type[0] === ORGANIZATION_LOG_TYPE_VALUE
     if (
-      params.section === 'organization' &&
-      !canAccessOrganizationLogs(useAuthStore.getState().auth.user)
+      params.section === USAGE_LOGS_DEFAULT_SECTION &&
+      requestsOrganization &&
+      !canAccessOrganization
     ) {
       throw redirect({
         to: '/usage-logs/$section',
         params: { section: USAGE_LOGS_DEFAULT_SECTION },
+        search: { ...search, type: [LOG_TYPE_ALL_VALUE] },
+        replace: true,
       })
     }
     // type 仅 common 使用，非 common 时清掉 URL 里的 type

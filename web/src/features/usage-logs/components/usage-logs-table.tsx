@@ -36,13 +36,13 @@ import {
   DEFAULT_LOGS_DATA,
   LOG_TYPE_ALL_VALUE,
   LOG_TYPE_ENUM,
+  ORGANIZATION_LOG_TYPE_VALUE,
 } from '../constants'
 import { useColumnsByCategory } from '../lib/columns'
 import { parseLogOther } from '../lib/format'
 import { fetchLogsByCategory } from '../lib/utils'
 import type { LogCategory } from '../types'
 import { CommonLogsFilterBar } from './common-logs-filter-bar'
-import { OrganizationLogsFilterBar } from './organization-logs-filter-bar'
 import { TaskLogsFilterBar } from './task-logs-filter-bar'
 import { UsageLogsMobileList } from './usage-logs-mobile-card'
 import { useLogsViewScope } from './usage-logs-provider'
@@ -82,9 +82,18 @@ interface UsageLogsTableProps {
 export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   const { t } = useTranslation()
   const { canManageScope, isAdminView } = useLogsViewScope()
-  const isAdmin = logCategory === 'organization' ? canManageScope : isAdminView
   const isMobile = useMediaQuery('(max-width: 640px)')
   const searchParams = route.useSearch()
+  const organizationFilterSelected =
+    Array.isArray(searchParams.type) &&
+    searchParams.type.length === 1 &&
+    searchParams.type[0] === ORGANIZATION_LOG_TYPE_VALUE
+  const effectiveLogCategory: LogCategory =
+    logCategory === 'common' && organizationFilterSelected
+      ? 'organization'
+      : logCategory
+  const isAdmin =
+    effectiveLogCategory === 'organization' ? canManageScope : isAdminView
 
   const commonColumnFilters = [
     {
@@ -116,30 +125,6 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
         ]
       : []),
   ]
-  const organizationColumnFilters = [
-    { columnId: 'action', searchKey: 'action', type: 'string' as const },
-    { columnId: 'request_id', searchKey: 'requestId', type: 'string' as const },
-    ...(isAdmin
-      ? [
-          {
-            columnId: 'organization',
-            searchKey: 'organizationId',
-            type: 'string' as const,
-          },
-          {
-            columnId: 'actor',
-            searchKey: 'actorUserId',
-            type: 'string' as const,
-          },
-          {
-            columnId: 'target',
-            searchKey: 'targetId',
-            type: 'string' as const,
-          },
-        ]
-      : []),
-  ]
-
   const {
     columnFilters,
     onColumnFiltersChange,
@@ -152,15 +137,13 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     pagination: { defaultPage: 1, defaultPageSize: isMobile ? 20 : 100 },
     globalFilter: { enabled: false },
     columnFilters:
-      logCategory === 'organization'
-        ? organizationColumnFilters
-        : commonColumnFilters,
+      effectiveLogCategory === 'organization' ? [] : commonColumnFilters,
   })
 
   const { data, isLoading, isFetching, isError, refetch } = useQuery({
     queryKey: [
       'logs',
-      logCategory,
+      effectiveLogCategory,
       isAdmin,
       pagination.pageIndex + 1,
       pagination.pageSize,
@@ -170,7 +153,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     ],
     queryFn: async () => {
       const result = await fetchLogsByCategory({
-        logCategory,
+        logCategory: effectiveLogCategory,
         isAdmin,
         page: pagination.pageIndex + 1,
         pageSize: pagination.pageSize,
@@ -185,7 +168,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
       return result.data || DEFAULT_LOGS_DATA
     },
     placeholderData: (previousData, previousQuery) => {
-      if (previousQuery?.queryKey[1] === logCategory) {
+      if (previousQuery?.queryKey[1] === effectiveLogCategory) {
         return previousData
       }
       return undefined
@@ -193,7 +176,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   })
 
   const logs = data?.items || []
-  const columns = useColumnsByCategory(logCategory, isAdmin)
+  const columns = useColumnsByCategory(effectiveLogCategory, isAdmin)
   const isLoadingData = isLoading || (isFetching && !data)
 
   const { table } = useDataTable({
@@ -201,7 +184,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     columns: columns as ColumnDef<Record<string, unknown>>[],
     columnFilters,
     columnVisibilityStorageKey: getColumnVisibilityStorageKey(
-      logCategory,
+      effectiveLogCategory,
       isAdmin
     ),
     pagination,
@@ -214,8 +197,8 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
     ensurePageInRange,
   })
 
-  const isCommon = logCategory === 'common'
-  const isOrganization = logCategory === 'organization'
+  const isCommon = effectiveLogCategory === 'common'
+  const isOrganization = effectiveLogCategory === 'organization'
   const emptyTitle = isOrganization
     ? t('No Organization Logs Found')
     : t('No Logs Found')
@@ -231,11 +214,8 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
   if (logCategory === 'drawing' || logCategory === 'task') {
     toolbar = <TaskLogsFilterBar table={table} logCategory={logCategory} />
   }
-  if (isCommon) {
+  if (logCategory === 'common') {
     toolbar = <CommonLogsFilterBar table={table} />
-  }
-  if (isOrganization) {
-    toolbar = <OrganizationLogsFilterBar table={table} />
   }
 
   if (isError) {
@@ -269,7 +249,7 @@ export function UsageLogsTable({ logCategory }: UsageLogsTableProps) {
         <UsageLogsMobileList
           table={table}
           isLoading={isLoadingData}
-          logCategory={logCategory}
+          logCategory={effectiveLogCategory}
           emptyTitle={emptyTitle}
           emptyDescription={emptyDescription}
         />

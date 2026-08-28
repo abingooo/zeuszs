@@ -49,12 +49,11 @@ const organizationLog: OrganizationUsageLog = {
 }
 
 describe('organization usage logs', () => {
-  test('builds platform filters and converts millisecond dates to seconds', () => {
+  test('builds a concise query and converts millisecond dates to seconds', () => {
     expect(
       buildOrganizationApiParams({
         page: 2,
         pageSize: 50,
-        isAdmin: true,
         searchParams: {
           action: 'organization.quota.allocate',
           organizationId: '17',
@@ -69,23 +68,17 @@ describe('organization usage logs', () => {
     ).toEqual({
       p: 2,
       page_size: 50,
-      action: 'organization.quota.allocate',
-      organization_id: 17,
-      actor_user_id: 42,
-      target_type: 'user',
-      target_id: '88',
-      request_id: 'request-1',
       start_timestamp: 10,
       end_timestamp: 20,
     })
   })
 
-  test('drops entity-ID filters for tenant viewers', () => {
+  test('does not apply legacy detailed filters to the simplified view', () => {
     const params = buildOrganizationApiParams({
       page: 1,
       pageSize: 20,
-      isAdmin: false,
       searchParams: {
+        action: 'organization.quota.allocate',
         organizationId: '17',
         actorUserId: '42',
         targetType: 'user',
@@ -100,7 +93,7 @@ describe('organization usage logs', () => {
     expect(params).not.toHaveProperty('actor_user_id')
     expect(params).not.toHaveProperty('target_type')
     expect(params).not.toHaveProperty('target_id')
-    expect(params.request_id).toBe('request-1')
+    expect(params).not.toHaveProperty('request_id')
   })
 
   test('renders localized action labels and hides entity IDs independently of names', () => {

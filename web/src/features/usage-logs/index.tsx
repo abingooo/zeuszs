@@ -34,6 +34,7 @@ import {
   useUsageLogsContext,
 } from './components/usage-logs-provider'
 import { UsageLogsTable } from './components/usage-logs-table'
+import { ORGANIZATION_LOG_TYPE_VALUE } from './constants'
 import {
   isUsageLogsSectionId,
   USAGE_LOGS_DEFAULT_SECTION,
@@ -45,7 +46,7 @@ const TASK_LOG_SECTIONS = ['drawing', 'task'] as const
 
 const SECTION_META: Record<UsageLogsSectionId, { titleKey: string }> = {
   common: {
-    titleKey: 'Common Logs',
+    titleKey: 'Usage Logs',
   },
   drawing: {
     titleKey: 'Drawing Logs',
@@ -53,15 +54,13 @@ const SECTION_META: Record<UsageLogsSectionId, { titleKey: string }> = {
   task: {
     titleKey: 'Task Logs',
   },
-  organization: {
-    titleKey: 'Organization Logs',
-  },
 }
 
 function UsageLogsContent() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const params = route.useParams()
+  const searchParams = route.useSearch()
   const activeCategory: UsageLogsSectionId =
     params.section && isUsageLogsSectionId(params.section)
       ? params.section
@@ -121,6 +120,10 @@ function UsageLogsContent() {
   )
 
   const pageMeta = SECTION_META[activeCategory]
+  const isOrganizationMode =
+    activeCategory === 'common' &&
+    searchParams.type?.length === 1 &&
+    searchParams.type[0] === ORGANIZATION_LOG_TYPE_VALUE
   const showTaskSwitcher =
     TASK_LOG_SECTIONS.includes(
       activeCategory as (typeof TASK_LOG_SECTIONS)[number]
@@ -132,7 +135,7 @@ function UsageLogsContent() {
         <SectionPageLayout.Title>
           {t(pageMeta.titleKey)}
         </SectionPageLayout.Title>
-        {canManageScope && activeCategory !== 'organization' && (
+        {canManageScope && !isOrganizationMode && (
           <SectionPageLayout.Actions>
             <Tabs value={viewScope} onValueChange={handleViewScopeChange}>
               <TabsList>

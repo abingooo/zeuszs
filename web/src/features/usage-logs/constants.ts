@@ -68,6 +68,13 @@ export const LOG_TYPE_ENUM = {
  */
 export const LOG_TYPE_ALL_VALUE = '0' as const
 
+/**
+ * Organization audit events use a separate endpoint and authorization model.
+ * This reserved filter value exposes them as a Usage Logs category without
+ * pretending they are rows from the numeric common-log type enum.
+ */
+export const ORGANIZATION_LOG_TYPE_VALUE = 'organization' as const
+
 // ============================================================================
 // Time Range Presets
 // ============================================================================
@@ -113,6 +120,7 @@ export const LOG_TYPE_FILTERS = [
       value: String(type.value),
     })
   ),
+  { label: 'Organization', value: ORGANIZATION_LOG_TYPE_VALUE },
 ] as const
 
 // ============================================================================

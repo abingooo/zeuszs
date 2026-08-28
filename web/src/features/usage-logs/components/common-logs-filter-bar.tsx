@@ -37,8 +37,14 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { canAccessOrganizationLogs } from '@/features/usage-logs/lib/organization-log-access'
+import { useAuthStore } from '@/stores/auth-store'
 
-import { LOG_TYPE_ALL_VALUE, LOG_TYPE_FILTERS } from '../constants'
+import {
+  LOG_TYPE_ALL_VALUE,
+  LOG_TYPE_FILTERS,
+  ORGANIZATION_LOG_TYPE_VALUE,
+} from '../constants'
 import { buildSearchParams } from '../lib/filter'
 import { getDefaultTimeRange } from '../lib/utils'
 import type { CommonLogFilters } from '../types'
@@ -120,6 +126,9 @@ export function CommonLogsFilterBar<TData>(
   const searchParams = route.useSearch()
   const { isAdminView: isAdmin } = useLogsViewScope()
   const { sensitiveVisible, setSensitiveVisible } = useUsageLogsContext()
+  const canViewOrganizationLogs = useAuthStore((state) =>
+    canAccessOrganizationLogs(state.auth.user)
+  )
   const fetchingLogs = useIsFetching({ queryKey: ['logs'] })
 
   const searchState = useMemo<CommonLogDraft>(() => {
@@ -174,6 +183,9 @@ export function CommonLogsFilterBar<TData>(
     draft.sourceKey === searchState.sourceKey ? draft : searchState
   const filters = activeDraft.filters
   const logType = activeDraft.logType
+  const organizationMode = logType === ORGANIZATION_LOG_TYPE_VALUE
+  const appliedOrganizationMode =
+    getLogTypeValue(searchParams.type) === ORGANIZATION_LOG_TYPE_VALUE
 
   const handleChange = useCallback(
     (field: keyof CommonLogFilters, value: Date | string | undefined) => {
@@ -191,7 +203,10 @@ export function CommonLogsFilterBar<TData>(
   )
 
   const handleApply = useCallback(() => {
-    const filterParams = buildSearchParams(filters, 'common')
+    const appliedFilters = organizationMode
+      ? { startTime: filters.startTime, endTime: filters.endTime }
+      : filters
+    const filterParams = buildSearchParams(appliedFilters, 'common')
     navigate({
       to: '/usage-logs/$section',
       params: { section: 'common' },
@@ -203,7 +218,7 @@ export function CommonLogsFilterBar<TData>(
     })
     queryClient.invalidateQueries({ queryKey: ['logs'] })
     queryClient.invalidateQueries({ queryKey: ['usage-logs-stats'] })
-  }, [filters, logType, navigate, queryClient])
+  }, [filters, logType, navigate, organizationMode, queryClient])
 
   const handleReset = useCallback(() => {
     const { start, end } = getDefaultTimeRange()
@@ -239,45 +254,49 @@ export function CommonLogsFilterBar<TData>(
   )
 
   const hasExpandedFilters =
-    !!filters.token ||
-    !!filters.username ||
-    !!filters.organizationId ||
-    !!filters.channel ||
-    !!filters.requestId ||
-    !!filters.upstreamRequestId
+    !organizationMode &&
+    (!!filters.token ||
+      !!filters.username ||
+      !!filters.organizationId ||
+      !!filters.channel ||
+      !!filters.requestId ||
+      !!filters.upstreamRequestId)
 
   const hasTypeFilter = logType !== LOG_TYPE_ALL_VALUE
   const hasAdditionalFilters =
-    !!filters.model || !!filters.group || hasTypeFilter || hasExpandedFilters
+    (!organizationMode && (!!filters.model || !!filters.group)) ||
+    hasTypeFilter ||
+    hasExpandedFilters
 
   const expandedFilterCount = [
-    filters.token,
-    isAdmin ? filters.username : undefined,
-    isAdmin ? filters.organizationId : undefined,
-    isAdmin ? filters.channel : undefined,
-    filters.requestId,
-    filters.upstreamRequestId,
+    organizationMode ? undefined : filters.token,
+    !organizationMode && isAdmin ? filters.username : undefined,
+    !organizationMode && isAdmin ? filters.organizationId : undefined,
+    !organizationMode && isAdmin ? filters.channel : undefined,
+    organizationMode ? undefined : filters.requestId,
+    organizationMode ? undefined : filters.upstreamRequestId,
   ].filter(Boolean).length
   const sensitiveInputClass = sensitiveVisible
     ? undefined
     : '[-webkit-text-security:disc]'
   const logTypeItems = useMemo(
     () =>
-      LOG_TYPE_FILTERS.map((type) => ({
-        value: type.value,
-        label: t(type.label),
-      })),
-    [t]
+      LOG_TYPE_FILTERS.filter(
+        (type) =>
+          type.value !== ORGANIZATION_LOG_TYPE_VALUE || canViewOrganizationLogs
+      ).map((type) => ({ value: type.value, label: t(type.label) })),
+    [canViewOrganizationLogs, t]
   )
   const logTypeLabel =
     logTypeItems.find((type) => type.value === logType)?.label ?? t('All Types')
 
-  const statsBar = (
+  const hideCommonSummary = organizationMode || appliedOrganizationMode
+  const statsBar = !hideCommonSummary ? (
     <div className='flex flex-wrap items-center gap-2'>
       <CommonLogsStats />
     </div>
-  )
-  const sensitiveToggle = (
+  ) : null
+  const sensitiveToggle = !hideCommonSummary ? (
     <Tooltip>
       <TooltipTrigger
         render={
@@ -296,7 +315,7 @@ export function CommonLogsFilterBar<TData>(
         {sensitiveVisible ? t('Hide') : t('Show')}
       </TooltipContent>
     </Tooltip>
-  )
+  ) : null
 
   const dateRangeFilter = (
     <LogsFilterField wide>
@@ -357,9 +376,9 @@ export function CommonLogsFilterBar<TData>(
         </SelectTrigger>
         <SelectContent alignItemWithTrigger={false}>
           <SelectGroup>
-            {LOG_TYPE_FILTERS.map((type) => (
+            {logTypeItems.map((type) => (
               <SelectItem key={type.value} value={type.value}>
-                {t(type.label)}
+                {type.label}
               </SelectItem>
             ))}
           </SelectGroup>
@@ -437,24 +456,27 @@ export function CommonLogsFilterBar<TData>(
       primaryFilters={
         <>
           {dateRangeFilter}
-          {modelFilter}
-          {groupFilter}
+          {!organizationMode && modelFilter}
+          {!organizationMode && groupFilter}
           {typeFilter}
         </>
       }
-      advancedFilters={advancedFilters}
+      advancedFilters={organizationMode ? undefined : advancedFilters}
       mobilePinnedFilters={dateRangeFilter}
       mobileFilters={
         <>
-          {modelFilter}
-          {groupFilter}
+          {!organizationMode && modelFilter}
+          {!organizationMode && groupFilter}
           {typeFilter}
-          {advancedFilters}
+          {!organizationMode && advancedFilters}
         </>
       }
       mobileFilterCount={
-        [filters.model, filters.group, hasTypeFilter].filter(Boolean).length +
-        expandedFilterCount
+        [
+          organizationMode ? undefined : filters.model,
+          organizationMode ? undefined : filters.group,
+          hasTypeFilter,
+        ].filter(Boolean).length + expandedFilterCount
       }
       hasAdvancedActiveFilters={hasExpandedFilters}
       advancedFilterCount={expandedFilterCount}

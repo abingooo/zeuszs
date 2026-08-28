@@ -26,8 +26,7 @@ import { formatTimestampToDate } from '@/lib/format'
 import {
   getOrganizationLogActionLabel,
   getOrganizationLogActorLabel,
-  getOrganizationLogDetails,
-  getOrganizationLogTargetLabel,
+  getOrganizationLogSummary,
 } from '../../lib/organization-logs'
 import type { OrganizationUsageLog } from '../../types'
 
@@ -83,85 +82,28 @@ export function useOrganizationLogsColumns(): ColumnDef<OrganizationUsageLog>[] 
       id: 'actor',
       header: t('Operator'),
       accessorFn: (row) => row.actor_username,
-      cell: ({ row }) => {
-        const log = row.original
-        const actor = getOrganizationLogActorLabel(
-          log.actor_username,
-          log.actor_user_id ?? 0,
-          showIDs,
-          t
-        )
-        const hasInitiator =
-          log.initiator_user_id != null || Boolean(log.initiator_username)
-        const isSameUser =
-          log.initiator_user_id != null && log.actor_user_id != null
-            ? log.initiator_user_id === log.actor_user_id
-            : Boolean(
-                log.initiator_username &&
-                log.initiator_username === log.actor_username
-              )
-        const showInitiator = hasInitiator && !isSameUser
-
-        return (
-          <div className='flex max-w-[190px] min-w-0 flex-col gap-0.5'>
-            <span className='truncate'>{actor}</span>
-            {showInitiator && (
-              <span className='text-muted-foreground truncate text-xs'>
-                {t('Initiator')}:{' '}
-                {getOrganizationLogActorLabel(
-                  log.initiator_username || '',
-                  log.initiator_user_id || 0,
-                  showIDs,
-                  t
-                )}
-              </span>
-            )}
-          </div>
-        )
-      },
-      size: 190,
-    },
-    {
-      id: 'target',
-      header: t('Target'),
-      accessorFn: (row) => row.target_name || row.target_type,
       cell: ({ row }) => (
-        <span className='block max-w-[180px] truncate'>
-          {getOrganizationLogTargetLabel(row.original, showIDs, t)}
+        <span className='block max-w-[190px] truncate'>
+          {getOrganizationLogActorLabel(
+            row.original.actor_username,
+            row.original.actor_user_id ?? 0,
+            showIDs,
+            t
+          )}
         </span>
       ),
-      size: 180,
+      size: 190,
     },
     {
       id: 'details',
       header: t('Details'),
-      accessorFn: (row) => getOrganizationLogDetails(row, t),
-      cell: ({ row }) => {
-        const details = getOrganizationLogDetails(row.original, t)
-        return details ? (
-          <span className='block max-w-[360px] min-w-[180px] text-sm break-words'>
-            {details}
-          </span>
-        ) : (
-          <span className='text-muted-foreground'>-</span>
-        )
-      },
-      size: 300,
-    },
-    {
-      accessorKey: 'request_id',
-      header: t('Request ID'),
+      accessorFn: (row) => getOrganizationLogSummary(row, showIDs, t),
       cell: ({ row }) => (
-        <StatusBadge
-          label={row.original.request_id || '-'}
-          copyText={row.original.request_id || undefined}
-          showDot={false}
-          size='sm'
-          variant='neutral'
-          className='max-w-[180px] font-mono'
-        />
+        <span className='block max-w-[420px] min-w-[220px] text-sm break-words'>
+          {getOrganizationLogSummary(row.original, showIDs, t)}
+        </span>
       ),
-      size: 190,
+      size: 360,
     },
   ]
 }

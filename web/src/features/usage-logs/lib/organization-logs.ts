@@ -213,3 +213,13 @@ export function getOrganizationLogTargetLabel(
   const name = log.target_name || fallback
   return showIDs && log.target_id ? `${name} (#${log.target_id})` : name
 }
+
+export function getOrganizationLogSummary(
+  log: OrganizationUsageLog,
+  showIDs: boolean,
+  t: TFunction
+): string {
+  const target = getOrganizationLogTargetLabel(log, showIDs, t)
+  const details = getOrganizationLogDetails(log, t)
+  return [target, details].filter(Boolean).join(' · ')
+}

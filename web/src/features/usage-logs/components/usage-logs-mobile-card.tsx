@@ -471,8 +471,6 @@ function OrganizationLogsCard<TData>({
           cell={cells.get('organization')}
         />
         <SummaryField label={t('Operator')} cell={cells.get('actor')} />
-        <SummaryField label={t('Target')} cell={cells.get('target')} />
-        <SummaryField label={t('Request ID')} cell={cells.get('request_id')} />
         <SummaryField
           label={t('Details')}
           cell={cells.get('details')}

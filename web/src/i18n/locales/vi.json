@@ -2611,7 +2611,6 @@
     "License": "Giấy phép",
     "Lifecycle status": "Trạng thái vòng đời",
     "Light": "Ánh sáng",
-    "Lightning Fast": "Nhanh như chớp",
     "Limit period": "Thời hiệu",
     "Limit Reached": "Đã đạt giới hạn",
     "Limit which models can be used with this key": "Giới hạn các mô hình có thể được sử dụng với khóa này",
@@ -5544,6 +5543,7 @@
     "Your Turnstile secret key": "Khóa bí mật Turnstile của bạn",
     "Your Turnstile site key": "Khóa site Turnstile của bạn",
     "Zero retention": "Không lưu dữ liệu",
+    "ZEUSZS": "ZEUSZS",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
     "Zoom": "Zoom"

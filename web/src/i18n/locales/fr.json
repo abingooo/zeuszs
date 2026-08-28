@@ -2611,7 +2611,6 @@
     "License": "Licence",
     "Lifecycle status": "État du cycle de vie",
     "Light": "Clair",
-    "Lightning Fast": "Extrêmement rapide",
     "Limit period": "Période de limite",
     "Limit Reached": "Limite atteinte",
     "Limit which models can be used with this key": "Limiter les modèles pouvant être utilisés avec cette clé",
@@ -5544,6 +5543,7 @@
     "Your Turnstile secret key": "Votre clé secrète Turnstile",
     "Your Turnstile site key": "Votre clé de site Turnstile",
     "Zero retention": "Aucune rétention",
+    "ZEUSZS": "ZEUSZS",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
     "Zoom": "Zoom"

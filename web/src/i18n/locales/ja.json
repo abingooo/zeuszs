@@ -2611,7 +2611,6 @@
     "License": "ライセンス",
     "Lifecycle status": "ライフサイクルステータス",
     "Light": "ライト",
-    "Lightning Fast": "超高速",
     "Limit period": "制限期間",
     "Limit Reached": "上限に達しました",
     "Limit which models can be used with this key": "このキーで使用できるモデルを制限する",
@@ -5544,6 +5543,7 @@
     "Your Turnstile secret key": "あなたのTurnstileシークレットキー",
     "Your Turnstile site key": "あなたのTurnstileサイトキー",
     "Zero retention": "データ保持なし",
+    "ZEUSZS": "ZEUSZS",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
     "Zoom": "ズーム"

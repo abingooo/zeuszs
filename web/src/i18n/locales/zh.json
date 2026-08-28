@@ -2611,7 +2611,6 @@
     "License": "许可证",
     "Lifecycle status": "生命周期状态",
     "Light": "浅色",
-    "Lightning Fast": "极速",
     "Limit period": "限制周期",
     "Limit Reached": "已达上限",
     "Limit which models can be used with this key": "限制此密钥可使用的模型",
@@ -5544,6 +5543,7 @@
     "Your Turnstile secret key": "您的 Turnstile 密钥",
     "Your Turnstile site key": "您的 Turnstile 站点密钥",
     "Zero retention": "零数据保留",
+    "ZEUSZS": "宙斯智算",
     "Zhipu": "智谱",
     "Zhipu V4": "智谱 V4",
     "Zoom": "缩放"

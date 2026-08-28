@@ -157,7 +157,6 @@ export const STATIC_I18N_KEYS = [
   'AI models supported',
   'uptime',
   'active users',
-  'Lightning Fast',
   'Optimized network architecture ensures millisecond response times',
   'Secure & Reliable',
   'Enterprise-grade security with comprehensive permission management',

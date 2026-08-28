@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Check, Moon, Sun } from 'lucide-react'
-import { useEffect } from 'react'
+import { useLayoutEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
@@ -32,15 +32,15 @@ import { cn } from '@/lib/utils'
 
 export function ThemeSwitch() {
   const { t } = useTranslation()
-  const { theme, setTheme } = useTheme()
+  const { resolvedTheme, theme, setTheme } = useTheme()
 
   /* Update theme-color meta tag
    * when theme is updated */
-  useEffect(() => {
-    const themeColor = theme === 'dark' ? '#020817' : '#fff'
+  useLayoutEffect(() => {
+    const themeColor = resolvedTheme === 'dark' ? '#121a27' : '#edf3f7'
     const metaThemeColor = document.querySelector("meta[name='theme-color']")
     if (metaThemeColor) metaThemeColor.setAttribute('content', themeColor)
-  }, [theme])
+  }, [resolvedTheme])
 
   return (
     <DropdownMenu modal={false}>

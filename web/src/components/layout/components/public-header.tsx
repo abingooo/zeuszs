@@ -58,6 +58,8 @@ export interface PublicHeaderProps {
   showNavigation?: boolean
   showAuthButtons?: boolean
   showNotifications?: boolean
+  immersive?: boolean
+  immersiveTone?: 'dark' | 'light'
   className?: string
 }
 
@@ -71,6 +73,9 @@ export function PublicHeader(props: PublicHeaderProps) {
     homeUrl = '/',
     showAuthButtons = true,
     showNotifications = true,
+    immersive = false,
+    immersiveTone = 'dark',
+    className,
   } = props
 
   const { t } = useTranslation()
@@ -95,6 +100,9 @@ export function PublicHeader(props: PublicHeaderProps) {
 
   const user = auth.user
   const isAuthenticated = !!user
+  const immersiveOverlay = immersive && !scrolled
+  const immersiveDark = immersiveOverlay && immersiveTone === 'dark'
+  const immersiveLight = immersiveOverlay && immersiveTone === 'light'
   const displaySiteName = customSiteName || systemName
   const links = dynamicLinks.length > 0 ? dynamicLinks : navLinks
 
@@ -173,9 +181,55 @@ export function PublicHeader(props: PublicHeaderProps) {
     [t]
   )
 
+  let logoContent: React.ReactNode
+  if (loading) {
+    logoContent = <Skeleton className='size-full rounded-lg' />
+  } else if (customLogo) {
+    logoContent = customLogo
+  } else {
+    logoContent = (
+      <HeaderLogo
+        src={systemLogo}
+        loading={loading}
+        logoLoaded={logoLoaded}
+        className='size-full rounded-lg object-contain'
+      />
+    )
+  }
+
+  let desktopAccountControl: React.ReactNode
+  if (loading) {
+    desktopAccountControl = <Skeleton className='h-8 w-20 rounded-lg' />
+  } else if (isAuthenticated) {
+    desktopAccountControl = <ProfileDropdown />
+  } else {
+    desktopAccountControl = (
+      <Button
+        size='sm'
+        className={cn(
+          'h-8 rounded-lg px-3.5 text-xs font-medium',
+          immersiveDark &&
+            'bg-white !text-black hover:bg-white/90 hover:!text-black',
+          immersiveLight &&
+            'bg-slate-950 !text-white hover:bg-slate-800 hover:!text-white'
+        )}
+        render={<Link to='/sign-in' />}
+      >
+        {t('Sign in')}
+      </Button>
+    )
+  }
+
   return (
     <>
-      <header className='pointer-events-none fixed inset-x-0 top-0 z-50'>
+      <header
+        data-immersive-overlay={immersiveOverlay ? 'true' : 'false'}
+        data-immersive-tone={immersiveOverlay ? immersiveTone : undefined}
+        className={cn(
+          'pointer-events-none fixed inset-x-0 top-0 z-50',
+          className
+        )}
+      >
         <div
           className={cn(
             'pointer-events-auto mx-auto transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
@@ -187,7 +241,11 @@ export function PublicHeader(props: PublicHeaderProps) {
               'flex items-center justify-between transition-all duration-700 ease-[cubic-bezier(0.16,1,0.3,1)]',
               scrolled
                 ? 'bg-background/60 ring-border/50 h-12 rounded-2xl pr-1.5 pl-4 shadow-[0_2px_16px_-6px_rgba(0,0,0,0.08),0_0_0_0.5px_rgba(0,0,0,0.02)] ring-[0.5px] backdrop-blur-2xl dark:shadow-[0_2px_16px_-6px_rgba(0,0,0,0.4)]'
-                : 'h-16 px-2'
+                : 'h-16 px-2',
+              immersiveDark &&
+                'text-white [&_[data-slot=button]]:text-white/80 [&_[data-slot=button]]:hover:bg-white/10 [&_[data-slot=button]]:hover:text-white',
+              immersiveLight &&
+                'text-slate-900 [&_[data-slot=button]]:text-slate-700 [&_[data-slot=button]]:hover:bg-slate-900/6 [&_[data-slot=button]]:hover:text-slate-950'
             )}
           >
             {/* Logo */}
@@ -196,32 +254,42 @@ export function PublicHeader(props: PublicHeaderProps) {
               className='group flex shrink-0 items-center gap-2.5'
             >
               <div className='flex size-7 shrink-0 items-center justify-center transition-all duration-300 group-hover:scale-105'>
-                {loading ? (
-                  <Skeleton className='size-full rounded-lg' />
-                ) : customLogo ? (
-                  customLogo
-                ) : (
-                  <HeaderLogo
-                    src={systemLogo}
-                    loading={loading}
-                    logoLoaded={logoLoaded}
-                    className='size-full rounded-lg object-contain'
-                  />
-                )}
+                {logoContent}
               </div>
-              <span className='text-sm font-semibold tracking-tight'>
+              <span
+                className={cn(
+                  'text-sm font-semibold tracking-normal',
+                  immersiveDark && 'text-white',
+                  immersiveLight && 'text-slate-950'
+                )}
+              >
                 {loading ? <Skeleton className='h-4 w-16' /> : displaySiteName}
               </span>
             </Link>
 
             {/* Desktop nav */}
             <div className='hidden items-center gap-0.5 sm:flex'>
-              {links.map((link, i) => {
+              {links.map((link) => {
                 const isActive = pathname === link.href
+                let navTextClassName =
+                  'text-muted-foreground hover:text-foreground'
+                if (immersiveOverlay) {
+                  if (immersiveTone === 'dark') {
+                    navTextClassName = isActive
+                      ? 'text-white'
+                      : 'text-white/66 hover:text-white'
+                  } else {
+                    navTextClassName = isActive
+                      ? 'text-slate-950'
+                      : 'text-slate-600 hover:text-slate-950'
+                  }
+                } else if (isActive) {
+                  navTextClassName = 'text-foreground'
+                }
                 if (link.external) {
                   return (
                     <a
-                      key={i}
+                      key={`${link.href}:${link.title}`}
                       href={link.href}
                       target='_blank'
                       rel='noopener noreferrer'
@@ -229,7 +297,11 @@ export function PublicHeader(props: PublicHeaderProps) {
                       tabIndex={link.disabled ? -1 : undefined}
                       onClick={(event) => handleNavLinkClick(event, link)}
                       className={cn(
-                        'text-muted-foreground hover:text-foreground rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-200',
+                        'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-200',
+                        immersiveDark && 'text-white/66 hover:text-white',
+                        immersiveLight && 'text-slate-600 hover:text-slate-950',
+                        !immersiveOverlay &&
+                          'text-muted-foreground hover:text-foreground',
                         link.disabled && 'pointer-events-none opacity-50'
                       )}
                     >
@@ -239,15 +311,13 @@ export function PublicHeader(props: PublicHeaderProps) {
                 }
                 return (
                   <Link
-                    key={i}
+                    key={`${link.href}:${link.title}`}
                     to={link.href}
                     disabled={link.disabled}
                     onClick={(event) => handleNavLinkClick(event, link)}
                     className={cn(
                       'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors duration-200',
-                      isActive
-                        ? 'text-foreground'
-                        : 'text-muted-foreground hover:text-foreground',
+                      navTextClassName,
                       link.disabled && 'pointer-events-none opacity-50'
                     )}
                   >
@@ -259,7 +329,14 @@ export function PublicHeader(props: PublicHeaderProps) {
               {(showLanguageSwitcher ||
                 showThemeSwitch ||
                 showNotifications) && (
-                <div className='bg-border/40 mx-2 h-4 w-px' />
+                <div
+                  className={cn(
+                    'mx-2 h-4 w-px',
+                    immersiveDark && 'bg-white/18',
+                    immersiveLight && 'bg-slate-900/14',
+                    !immersiveOverlay && 'bg-border/40'
+                  )}
+                />
               )}
 
               {showLanguageSwitcher && <LanguageSwitcher />}
@@ -279,20 +356,15 @@ export function PublicHeader(props: PublicHeaderProps) {
 
               {showAuthButtons && (
                 <>
-                  <div className='bg-border/40 mx-1 h-4 w-px' />
-                  {loading ? (
-                    <Skeleton className='h-8 w-20 rounded-lg' />
-                  ) : isAuthenticated ? (
-                    <ProfileDropdown />
-                  ) : (
-                    <Button
-                      size='sm'
-                      className='h-8 rounded-lg px-3.5 text-xs font-medium'
-                      render={<Link to='/sign-in' />}
-                    >
-                      {t('Sign in')}
-                    </Button>
-                  )}
+                  <div
+                    className={cn(
+                      'mx-1 h-4 w-px',
+                      immersiveDark && 'bg-white/18',
+                      immersiveLight && 'bg-slate-900/14',
+                      !immersiveOverlay && 'bg-border/40'
+                    )}
+                  />
+                  {desktopAccountControl}
                 </>
               )}
             </div>
@@ -364,7 +436,7 @@ export function PublicHeader(props: PublicHeaderProps) {
               if (link.external) {
                 return (
                   <a
-                    key={i}
+                    key={`${link.href}:${link.title}`}
                     href={link.href}
                     target='_blank'
                     rel='noopener noreferrer'
@@ -380,7 +452,7 @@ export function PublicHeader(props: PublicHeaderProps) {
               }
               return (
                 <Link
-                  key={i}
+                  key={`${link.href}:${link.title}`}
                   to={link.href}
                   disabled={link.disabled}
                   onClick={(event) => handleNavLinkClick(event, link, true)}

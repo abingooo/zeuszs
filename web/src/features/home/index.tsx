@@ -20,13 +20,13 @@ import { useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { PublicLayout } from '@/components/layout'
-import { Footer } from '@/components/layout/components/footer'
 import { RichContent } from '@/components/rich-content'
 import { useTheme } from '@/context/theme-provider'
 import { isLikelyHtml } from '@/lib/content-format'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { CTA, Features, Hero, HowItWorks, Stats } from './components'
+import { Hero } from './components'
+import { HeroLoadingShell } from './components/sections/hero'
 import { useHomePageContent } from './hooks'
 
 export function Home() {
@@ -60,10 +60,14 @@ export function Home() {
 
   if (!isLoaded) {
     return (
-      <PublicLayout showMainContainer={false}>
-        <main className='flex min-h-screen items-center justify-center'>
-          <div className='text-muted-foreground'>{t('Loading...')}</div>
-        </main>
+      <PublicLayout
+        showMainContainer={false}
+        headerProps={{
+          immersive: true,
+          immersiveTone: resolvedTheme,
+        }}
+      >
+        <HeroLoadingShell />
       </PublicLayout>
     )
   }
@@ -121,13 +125,14 @@ export function Home() {
   }
 
   return (
-    <PublicLayout showMainContainer={false}>
+    <PublicLayout
+      showMainContainer={false}
+      headerProps={{
+        immersive: true,
+        immersiveTone: resolvedTheme,
+      }}
+    >
       <Hero isAuthenticated={isAuthenticated} />
-      <Stats />
-      <Features />
-      <HowItWorks />
-      <CTA isAuthenticated={isAuthenticated} />
-      <Footer />
     </PublicLayout>
   )
 }

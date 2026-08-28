@@ -116,6 +116,7 @@ Transitive dependencies should be audited before a final external release.
 | web | production | npm | `stream-markdown-parser` | `1.1.3` | MIT |
 | web | production | npm | `tailwind-merge` | `3.6.0` | MIT |
 | web | production | npm | `tailwindcss` | `4.3.3` | MIT |
+| web | production | npm | `three` | `0.185.1` | MIT |
 | web | production | npm | `tokenlens` | `1.3.1` | MIT |
 | web | production | npm | `tw-animate-css` | `1.4.0` | MIT |
 | web | production | npm | `use-stick-to-bottom` | `1.1.6` | MIT |
@@ -131,6 +132,7 @@ Transitive dependencies should be audited before a final external release.
 | web | development | npm | `@types/node` | `26.1.1` | MIT |
 | web | development | npm | `@types/react` | `19.2.17` | MIT |
 | web | development | npm | `@types/react-dom` | `19.2.3` | MIT |
+| web | development | npm | `@types/three` | `0.185.4` | MIT |
 | web | development | npm | `@typescript/native-preview` | `7.0.0-dev.20260707.2` | Apache-2.0 |
 | web | development | npm | `@xyflow/react` | `12.11.2` | MIT |
 | web | development | npm | `embla-carousel-react` | `8.6.0` | MIT |
@@ -141,6 +143,32 @@ Transitive dependencies should be audited before a final external release.
 | electron    | development | npm       | `cross-env`                                           | `7.0.3`                              | MIT                                                |
 | electron    | development | npm       | `electron`                                            | `39.8.5`                             | MIT                                                |
 | electron    | development | npm       | `electron-builder`                                    | `26.7.0`                             | MIT                                                |
+
+## Orbital Earth Visual Assets
+
+The default public home page includes the following Earth textures and
+project-generated poster derivatives. These notices are included here because
+this root compliance file is shipped with release artifacts.
+
+The 8192 x 4096 day, night, and cloud source maps were downloaded on
+2026-08-28 from Solar System Scope:
+
+- <https://www.solarsystemscope.com/textures/download/8k_earth_daymap.jpg>
+  (SHA-256 `88ab060b6e7d241cfc590c69f528fab2b3247b738d40124cb590999a6fe44abc`).
+- <https://www.solarsystemscope.com/textures/download/8k_earth_nightmap.jpg>
+  (SHA-256 `9894e83a585a22c1c425e7ca4f987a9ba625bf08ecee45d3c9dcacae3c2ad5f7`).
+- <https://www.solarsystemscope.com/textures/download/8k_earth_clouds.jpg>
+  (SHA-256 `c792eca228989d36ebb45d3ea6ff1198be5e21a25d70d2fbcb2124ffd14ba7f5`).
+
+`earth-day-4k.webp`, `earth-night-4k.webp`, and `earth-clouds-4k.webp` are
+4096 x 2048 WebP derivatives produced with cwebp 1.6.0. Solar System Scope
+distributes these maps under the Creative Commons Attribution 4.0
+International license and permits adaptation and commercial use:
+<https://www.solarsystemscope.com/textures/>.
+
+The `orbital-earth-poster-*.avif` and `orbital-earth-poster-*.webp` files are
+project-generated renders derived from these maps and retain the same
+attribution and license.
 
 ## License Texts
 

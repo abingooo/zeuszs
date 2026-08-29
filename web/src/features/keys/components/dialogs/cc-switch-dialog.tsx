@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button'
 import { ComboboxInput } from '@/components/ui/combobox-input'
 import { Label } from '@/components/ui/label'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { useApiInfo } from '@/features/dashboard/hooks/use-status-data'
 import { getUserModels } from '@/lib/api'
 
 const APP_CONFIGS = {
@@ -53,7 +54,9 @@ const APP_CONFIGS = {
 
 type AppType = keyof typeof APP_CONFIGS
 
-function getServerAddress(): string {
+function getServerAddress(apiUrl?: string): string {
+  const normalizedApiUrl = apiUrl?.trim().replace(/\/+$/, '')
+  if (normalizedApiUrl) return normalizedApiUrl
   try {
     const raw = localStorage.getItem('status')
     if (raw) {
@@ -70,10 +73,11 @@ function buildCCSwitchURL(
   app: string,
   name: string,
   models: Record<string, string>,
-  apiKey: string
+  apiKey: string,
+  apiUrl?: string
 ): string {
-  const serverAddress = getServerAddress()
-  const endpoint = app === 'codex' ? serverAddress + '/v1' : serverAddress
+  const serverAddress = getServerAddress(apiUrl)
+  const endpoint = app === 'codex' ? `${serverAddress}/v1` : serverAddress
   const params = new URLSearchParams()
   params.set('resource', 'provider')
   params.set('app', app)
@@ -99,6 +103,8 @@ export function CCSwitchDialog(props: Props) {
   const [app, setApp] = useState<AppType>('claude')
   const [name, setName] = useState<string>(APP_CONFIGS.claude.defaultName)
   const [models, setModels] = useState<Record<string, string>>({})
+  const { items: apiInfoItems } = useApiInfo()
+  const preferredApiUrl = apiInfoItems.find((item) => item.url?.trim())?.url
 
   const { data: modelsData } = useQuery({
     queryKey: ['user-models-ccswitch'],
@@ -140,7 +146,7 @@ export function CCSwitchDialog(props: Props) {
     const key = props.tokenKey.startsWith('sk-')
       ? props.tokenKey
       : `sk-${props.tokenKey}`
-    const url = buildCCSwitchURL(app, name, models, key)
+    const url = buildCCSwitchURL(app, name, models, key, preferredApiUrl)
     window.open(url, '_blank')
     props.onOpenChange(false)
   }
@@ -196,7 +202,7 @@ export function CCSwitchDialog(props: Props) {
             onValueChange={setName}
             placeholder={currentConfig.defaultName}
             emptyText=''
-            allowCustomValue={true}
+            allowCustomValue
           />
         </div>
 

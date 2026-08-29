@@ -22,11 +22,11 @@ import type { PingStatus } from '@/features/dashboard/types'
  * Get color class for latency status
  */
 export function getLatencyColorClass(latency: number): string {
-  if (latency < 200) {
+  if (latency < 1000) {
     return 'text-green-600 dark:text-green-400'
   }
-  if (latency < 500) {
-    return 'text-yellow-600 dark:text-yellow-400'
+  if (latency < 3000) {
+    return 'text-orange-600 dark:text-orange-400'
   }
   return 'text-red-600 dark:text-red-400'
 }
@@ -46,7 +46,7 @@ export async function testUrlLatency(url: string): Promise<PingStatus> {
     const latency = Math.round(endTime - startTime)
 
     return { latency, testing: false, error: false }
-  } catch (_error) {
+  } catch {
     return { latency: null, testing: false, error: true }
   }
 }

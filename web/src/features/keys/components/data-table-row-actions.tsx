@@ -50,6 +50,7 @@ import {
 import { useChatPresets } from '@/features/chat/hooks/use-chat-presets'
 import { resolveChatUrl, type ChatPreset } from '@/features/chat/lib/chat-links'
 import { sendToFluent } from '@/features/chat/lib/send-to-fluent'
+import { useApiInfo } from '@/features/dashboard/hooks/use-status-data'
 import { encodeChannelConnectionInfo } from '@/lib/channel-connection-info'
 import { copyToClipboard } from '@/lib/copy-to-clipboard'
 
@@ -58,7 +59,9 @@ import { API_KEY_STATUS, ERROR_MESSAGES, SUCCESS_MESSAGES } from '../constants'
 import { apiKeySchema } from '../types'
 import { useApiKeys } from './api-keys-provider'
 
-function getServerAddress(): string {
+function getServerAddress(apiUrl?: string): string {
+  const normalizedApiUrl = apiUrl?.trim().replace(/\/+$/, '')
+  if (normalizedApiUrl) return normalizedApiUrl
   try {
     const raw = localStorage.getItem('status')
     if (raw) {
@@ -91,6 +94,8 @@ export function DataTableRowActions<TData>({
   } = useApiKeys()
   const isEnabled = apiKey.status === API_KEY_STATUS.ENABLED
   const { chatPresets, serverAddress } = useChatPresets()
+  const { items: apiInfoItems } = useApiInfo()
+  const preferredApiUrl = apiInfoItems.find((item) => item.url?.trim())?.url
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
   const resolvedRealKey = resolvedKeys[apiKey.id]
   const isRealKeyLoading = Boolean(loadingKeys[apiKey.id])
@@ -257,7 +262,7 @@ export function DataTableRowActions<TData>({
             if (!realKey) return
             const connStr = encodeChannelConnectionInfo(
               realKey,
-              getServerAddress()
+              getServerAddress(preferredApiUrl)
             )
             const ok = await copyToClipboard(connStr)
             if (ok) toast.success(t('Copied'))

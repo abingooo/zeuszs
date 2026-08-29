@@ -10,6 +10,9 @@ Type=simple
 User=root
 Group=root
 EnvironmentFile=/etc/zeuszs-updater.env
+# Docker CLI must keep its client configuration outside /root because
+# ProtectHome=true makes the root home directory read-only to this service.
+Environment=DOCKER_CONFIG=/var/lib/zeuszs-updater/docker-config
 RuntimeDirectory=zeuszs-updater
 RuntimeDirectoryMode=0750
 RuntimeDirectoryPreserve=yes

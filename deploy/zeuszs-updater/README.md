@@ -15,6 +15,10 @@ The updater downloads release assets from `abingooo/zeuszs`, verifies every down
 7. Mount the complete `/run/zeuszs-updater` host directory at `/run/zeuszs-updater` read-only in the `new-api` container and provide the same updater token to the application through its protected runtime secret configuration.
 8. Run `systemctl daemon-reload` and `systemctl enable --now zeuszs-updater`.
 
+The supplied systemd unit sets `DOCKER_CONFIG=/var/lib/zeuszs-updater/docker-config`.
+This keeps Docker's client configuration in the updater state directory, which
+is writable by the service even with `ProtectHome=true` and `ProtectSystem=strict`.
+
 The complete runtime directory is mounted instead of the socket file so a helper restart cannot leave the application bound to a stale Unix-socket inode. Do not commit the real token or place it in the Compose file.
 
 The updater refuses prerelease, replay, and downgrade requests. It also verifies that the configured Compose service resolves to exactly `zeuszs:stable`, enforces download size limits, and requires the configured minimum free space on the release, backup, and Docker filesystems before it changes an image tag.

@@ -22,7 +22,6 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 
 import en from '@/i18n/locales/en.json'
 import zhCN from '@/i18n/locales/zh.json'
-import { useSystemConfigStore } from '@/stores/system-config-store'
 
 import { OrbitalBrandLockup } from '../orbital-brand-lockup'
 
@@ -67,35 +66,6 @@ describe('ZEUSZS brand lockup', () => {
     expect(
       container.querySelector('[data-brand-wordmark="zhCN"]')
     ).not.toBeInTheDocument()
-  })
-
-  test('uses the configured deployment logo after system status loads', () => {
-    const previousState = useSystemConfigStore.getState()
-
-    act(() => {
-      useSystemConfigStore.getState().setConfig({
-        logo: '/mozi-logo.png',
-        systemName: '墨子智研',
-      })
-      useSystemConfigStore.getState().setLoading(false)
-    })
-
-    try {
-      const { container } = render(<OrbitalBrandLockup />)
-
-      expect(container.querySelector('[data-zeuszs-logo]')).toHaveAttribute(
-        'src',
-        '/mozi-logo.png'
-      )
-    } finally {
-      act(() => {
-        useSystemConfigStore.setState({
-          config: previousState.config,
-          loading: previousState.loading,
-          loadedLogoUrl: previousState.loadedLogoUrl,
-        })
-      })
-    }
   })
 
   test('switches to a clean Chinese text wordmark when the interface language changes', async () => {

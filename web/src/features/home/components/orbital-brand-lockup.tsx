@@ -28,13 +28,12 @@ type OrbitalBrandLockupProps = {
 
 export function OrbitalBrandLockup(props: OrbitalBrandLockupProps) {
   const { i18n, t } = useTranslation()
-  const { logo, systemName, loading } = useSystemConfig()
+  const { systemName, loading } = useSystemConfig()
   const language = normalizeInterfaceLanguage(
     i18n.resolvedLanguage || i18n.language
   )
   const isChinese = language === 'zhCN'
   const displayName = loading ? t('ZEUSZS') : systemName
-  const displayLogo = loading ? '/zeuszs-logo.png' : logo || '/zeuszs-logo.png'
 
   return (
     <h1
@@ -48,7 +47,7 @@ export function OrbitalBrandLockup(props: OrbitalBrandLockupProps) {
     >
       <img
         data-zeuszs-logo
-        src={displayLogo}
+        src='/zeuszs-logo.png'
         alt=''
         aria-hidden='true'
         width='512'

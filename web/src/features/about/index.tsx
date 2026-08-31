@@ -27,6 +27,35 @@ import { isHttpUrl, isLikelyHtml } from '@/lib/content-format'
 
 import { getAboutContent } from './api'
 
+function AboutSourceNotice() {
+  const { t } = useTranslation()
+
+  return (
+    <aside
+      data-about-source-notice
+      className='border-border/60 bg-muted/20 text-muted-foreground mt-8 rounded-lg border px-4 py-4 text-sm'
+    >
+      <p className='text-foreground font-medium'>
+        {t('ZeusZS is based on New API.')}
+      </p>
+      <p className='mt-1 text-xs leading-5'>
+        {t('Frontend design and development by New API contributors.')}
+      </p>
+      <p className='mt-2 text-xs leading-5'>
+        {t('New API Project Repository:')}{' '}
+        <a
+          href='https://github.com/QuantumNous/new-api'
+          target='_blank'
+          rel='noopener noreferrer'
+          className='text-primary hover:underline'
+        >
+          {t('New API')}
+        </a>
+      </p>
+    </aside>
+  )
+}
+
 function EmptyAboutState() {
   const { t } = useTranslation()
   const currentYear = new Date().getFullYear()
@@ -45,18 +74,8 @@ function EmptyAboutState() {
             )}
           </p>
         </div>
+        <AboutSourceNotice />
         <div className='space-y-4 text-sm'>
-          <p>
-            {t('New API Project Repository:')}{' '}
-            <a
-              href='https://github.com/QuantumNous/new-api'
-              target='_blank'
-              rel='noopener noreferrer'
-              className='text-primary hover:underline'
-            >
-              {t('https://github.com/QuantumNous/new-api')}
-            </a>
-          </p>
           <p className='text-muted-foreground'>
             <a
               href='https://github.com/QuantumNous/new-api'
@@ -148,12 +167,17 @@ export function About() {
   if (isUrl) {
     return (
       <PublicLayout showMainContainer={false}>
-        <iframe
-          src={rawContent}
-          className='h-[calc(100vh-3.5rem)] w-full border-0'
-          title={t('About')}
-          sandbox='allow-forms allow-popups allow-popups-to-escape-sandbox allow-scripts'
-        />
+        <div>
+          <iframe
+            src={rawContent}
+            className='h-[calc(100vh-3.5rem)] w-full border-0'
+            title={t('About')}
+            sandbox='allow-forms allow-popups allow-popups-to-escape-sandbox allow-scripts'
+          />
+          <div className='mx-auto max-w-6xl px-4 pb-6'>
+            <AboutSourceNotice />
+          </div>
+        </div>
       </PublicLayout>
     )
   }
@@ -161,12 +185,15 @@ export function About() {
   if (contentIsHtml) {
     return (
       <PublicLayout showMainContainer={false}>
-        <RichContent
-          mode='html'
-          htmlVariant='isolated'
-          content={rawContent}
-          className='prose-neutral dark:prose-invert max-w-none'
-        />
+        <div className='mx-auto max-w-6xl px-4 py-8'>
+          <RichContent
+            mode='html'
+            htmlVariant='isolated'
+            content={rawContent}
+            className='prose-neutral dark:prose-invert max-w-none'
+          />
+          <AboutSourceNotice />
+        </div>
       </PublicLayout>
     )
   }
@@ -179,6 +206,7 @@ export function About() {
           content={rawContent}
           className='prose-neutral dark:prose-invert max-w-none'
         />
+        <AboutSourceNotice />
       </div>
     </PublicLayout>
   )

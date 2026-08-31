@@ -105,17 +105,20 @@ describe('orbital Earth hero', () => {
 
   test('presents ZEUSZS as the English page heading', () => {
     const { container } = render(<Hero isAuthenticated={false} />)
+    const hero = container.querySelector('[data-home-hero]')
 
     expect(
       screen.getByRole('heading', { level: 1, name: 'ZEUSZS' })
     ).toBeVisible()
-    expect(container.querySelector('[data-home-hero]')).toHaveClass('h-svh')
-    expect(container.querySelector('[data-home-hero]')).toHaveClass(
-      'max-md:h-auto'
-    )
+    expect(container.querySelector('[data-home-hero]')).toHaveClass('min-h-svh')
+    expect(container.querySelector('[data-home-hero]')).not.toHaveClass('h-svh')
     expect(container.querySelector('[data-home-hero]')).not.toHaveClass(
       'h-[calc(100svh-4rem)]'
     )
+    expect(hero).not.toHaveTextContent(
+      'Supports one-click configuration and perfectly adapts to NewAPI multi-protocol configuration.'
+    )
+    expect(hero).not.toHaveTextContent('AI infrastructure for teams')
   })
 
   test('fills the hero information panel with localized platform capabilities', () => {
@@ -123,7 +126,10 @@ describe('orbital Earth hero', () => {
 
     const capabilities = container.querySelector('[data-home-capabilities]')
     expect(capabilities).toBeVisible()
-    expect(capabilities).toHaveTextContent('AI infrastructure for teams')
+    expect(capabilities).toHaveTextContent(
+      'A unified AI model platform for enterprise R&D and research teams'
+    )
+    expect(capabilities).not.toHaveTextContent('AI infrastructure for teams')
     expect(capabilities).toHaveTextContent('Unified API')
     expect(capabilities).toHaveTextContent('Team controls')
     expect(capabilities).toHaveTextContent('Clear billing')
@@ -156,9 +162,15 @@ describe('orbital Earth hero', () => {
     })
 
     const capabilities = document.querySelector('[data-home-capabilities]')
-    expect(capabilities).toHaveTextContent('面向团队的 AI 基础设施')
+    expect(capabilities).toHaveTextContent(
+      '面向企业研发与科研团队的统一 AI 模型平台'
+    )
+    expect(capabilities).not.toHaveTextContent('面向团队的 AI 基础设施')
     expect(capabilities).toHaveTextContent('统一 API')
     expect(capabilities).toHaveTextContent('文献研读')
+    expect(document.querySelector('[data-home-hero]')).not.toHaveTextContent(
+      '支持一键配置并完美适配 NewAPI 多协议配置'
+    )
   })
 
   test('uses the same original-logo brand lockup in the loading shell', () => {
@@ -168,8 +180,8 @@ describe('orbital Earth hero', () => {
     expect(loadingHero).toContainElement(
       container.querySelector('[data-orbital-brand-lockup]')
     )
-    expect(loadingHero).toHaveClass('h-svh')
-    expect(loadingHero).toHaveClass('max-md:h-auto')
+    expect(loadingHero).toHaveClass('min-h-svh')
+    expect(loadingHero).not.toHaveClass('h-svh')
     expect(loadingHero).not.toHaveClass('h-[calc(100svh-4rem)]')
     expect(
       screen.getByRole('heading', { level: 1, name: 'ZEUSZS' })

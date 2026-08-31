@@ -35,7 +35,7 @@ interface HeroProps {
 }
 
 const HERO_FRAME_CLASSNAME =
-  'relative isolate h-svh min-h-svh max-md:h-auto overflow-hidden bg-[#edf3f7] text-slate-950 transition-colors duration-500 dark:bg-[#121a27] dark:text-white'
+  'relative isolate min-h-svh overflow-hidden bg-[#edf3f7] text-slate-950 transition-colors duration-500 dark:bg-[#121a27] dark:text-white'
 
 export function HeroLoadingShell() {
   const { resolvedTheme } = useTheme()
@@ -48,7 +48,7 @@ export function HeroLoadingShell() {
       className={HERO_FRAME_CLASSNAME}
     >
       <OrbitalEarthPoster appearance={resolvedTheme} />
-      <div className='relative z-10 mx-auto flex size-full max-w-7xl items-start px-6 pt-28 sm:px-8 sm:pt-36 lg:px-12 lg:pt-40'>
+      <div className='relative z-10 mx-auto flex min-h-svh w-full max-w-7xl items-start px-6 pt-24 pb-12 sm:px-8 sm:pt-28 lg:px-12 lg:pt-32'>
         <OrbitalBrandLockup className='text-slate-950 dark:text-[#fff8eb]' />
       </div>
     </section>
@@ -98,49 +98,37 @@ export function Hero(props: HeroProps) {
     >
       <OrbitalEarthScene />
 
-      <div className='relative z-10 mx-auto flex size-full max-w-7xl items-start px-6 pt-28 sm:px-8 sm:pt-36 lg:px-12 lg:pt-40'>
+      <div className='relative z-10 mx-auto flex min-h-svh w-full max-w-7xl items-start px-6 pt-24 pb-12 sm:px-8 sm:pt-28 lg:px-12 lg:pt-32'>
         <div className='flex max-w-xl flex-col items-start text-left lg:max-w-2xl'>
           <OrbitalBrandLockup className='landing-animate-fade-up text-slate-950 opacity-0 [animation-delay:120ms] dark:text-[#fff8eb]' />
 
-          <div
-            className='landing-animate-fade-up mt-9 flex flex-wrap items-center gap-3 opacity-0'
-            style={{ animationDelay: '240ms' }}
-          >
-            {props.isAuthenticated ? (
-              <>
-                <Button
-                  className='group h-11 rounded-lg bg-slate-950 px-5 text-sm font-medium text-white shadow-[0_10px_35px_rgba(15,23,42,0.12)] hover:bg-slate-800 dark:bg-white dark:text-black dark:shadow-[0_10px_35px_rgba(255,255,255,0.12)] dark:hover:bg-white/90'
-                  render={<Link to='/dashboard' />}
-                >
-                  {t('Go to Dashboard')}
-                  <ArrowRight className='ml-1.5 size-4 transition-transform duration-200 group-hover:translate-x-0.5' />
-                </Button>
-                {renderDocsButton()}
-              </>
-            ) : (
-              <>
-                <Button
-                  className='group h-11 rounded-lg bg-slate-950 px-5 text-sm font-medium text-white shadow-[0_10px_35px_rgba(15,23,42,0.12)] hover:bg-slate-800 dark:bg-white dark:text-black dark:shadow-[0_10px_35px_rgba(255,255,255,0.12)] dark:hover:bg-white/90'
-                  render={<Link to='/sign-up' />}
-                >
-                  {t('Get Started')}
-                  <ArrowRight className='ml-1.5 size-4 transition-transform duration-200 group-hover:translate-x-0.5' />
-                </Button>
-                {renderDocsButton()}
-              </>
-            )}
-          </div>
-
-          <p
-            className='landing-animate-fade-up mt-5 max-w-lg text-sm leading-6 text-slate-600 opacity-0 sm:text-[15px] dark:text-white/42'
-            style={{ animationDelay: '360ms' }}
-          >
-            {t(
-              'Supports one-click configuration and perfectly adapts to NewAPI multi-protocol configuration.'
-            )}
-          </p>
-
-          <HeroCapabilities />
+          <HeroCapabilities
+            actions={
+              props.isAuthenticated ? (
+                <>
+                  <Button
+                    className='group h-11 rounded-lg bg-sky-600 px-5 text-sm font-medium text-white shadow-[0_10px_35px_rgba(2,132,199,0.18)] hover:bg-sky-700 dark:bg-sky-400 dark:text-slate-950 dark:shadow-[0_10px_35px_rgba(56,189,248,0.16)] dark:hover:bg-sky-300'
+                    render={<Link to='/dashboard' />}
+                  >
+                    {t('Go to Dashboard')}
+                    <ArrowRight className='ml-1.5 size-4 transition-transform duration-200 group-hover:translate-x-0.5' />
+                  </Button>
+                  {renderDocsButton()}
+                </>
+              ) : (
+                <>
+                  <Button
+                    className='group h-11 rounded-lg bg-sky-600 px-5 text-sm font-medium text-white shadow-[0_10px_35px_rgba(2,132,199,0.18)] hover:bg-sky-700 dark:bg-sky-400 dark:text-slate-950 dark:shadow-[0_10px_35px_rgba(56,189,248,0.16)] dark:hover:bg-sky-300'
+                    render={<Link to='/sign-up' />}
+                  >
+                    {t('Get Started')}
+                    <ArrowRight className='ml-1.5 size-4 transition-transform duration-200 group-hover:translate-x-0.5' />
+                  </Button>
+                  {renderDocsButton()}
+                </>
+              )
+            }
+          />
         </div>
       </div>
     </section>

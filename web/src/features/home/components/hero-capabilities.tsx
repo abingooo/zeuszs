@@ -21,11 +21,12 @@ import {
   UserGroupIcon,
 } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
+import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { cn } from '@/lib/utils'
 
-type CapabilityTone = 'blue' | 'green' | 'amber' | 'violet'
+type CapabilityTone = 'blue' | 'green' | 'amber' | 'cyan'
 
 type Capability = {
   id: string
@@ -61,11 +62,11 @@ const CAPABILITY_TONES: Record<
       'border-amber-500/25 bg-amber-500/10 group-hover:border-amber-500/40 group-hover:bg-amber-500/15',
     accent: 'bg-amber-500/70',
   },
-  violet: {
-    icon: 'text-violet-700 dark:text-violet-300',
+  cyan: {
+    icon: 'text-cyan-700 dark:text-cyan-300',
     iconFrame:
-      'border-violet-500/25 bg-violet-500/10 group-hover:border-violet-500/40 group-hover:bg-violet-500/15',
-    accent: 'bg-violet-500/70',
+      'border-cyan-500/25 bg-cyan-500/10 group-hover:border-cyan-500/40 group-hover:bg-cyan-500/15',
+    accent: 'bg-cyan-500/70',
   },
 }
 
@@ -96,7 +97,7 @@ const CAPABILITY_DEFINITIONS = [
     title: 'Protected access',
     description: 'Scoped keys and secure access',
     icon: SecurityIcon,
-    tone: 'violet',
+    tone: 'cyan',
   },
 ] satisfies ReadonlyArray<{
   id: string
@@ -113,7 +114,11 @@ const WORKFLOW_KEYS = [
   'Team collaboration',
 ] as const
 
-export function HeroCapabilities() {
+type HeroCapabilitiesProps = {
+  actions?: ReactNode
+}
+
+export function HeroCapabilities(props: HeroCapabilitiesProps) {
   const { t } = useTranslation()
 
   const capabilities: Capability[] = CAPABILITY_DEFINITIONS.map((item) => ({
@@ -126,31 +131,34 @@ export function HeroCapabilities() {
     <section
       aria-labelledby='home-capabilities-title'
       data-home-capabilities
-      className='landing-animate-fade-up mt-5 w-full max-w-2xl opacity-0 max-sm:-mx-3 max-sm:rounded-2xl max-sm:bg-white/65 max-sm:p-3 max-sm:backdrop-blur-[2px] dark:max-sm:bg-[#121a27]/70'
-      style={{ animationDelay: '420ms' }}
+      className='landing-animate-fade-up mt-7 w-full max-w-2xl opacity-0 max-sm:-mx-3 max-sm:rounded-2xl max-sm:bg-white/60 max-sm:p-3 max-sm:backdrop-blur-[2px] dark:max-sm:bg-[#121a27]/70'
+      style={{ animationDelay: '240ms' }}
     >
       <div className='max-w-xl'>
-        <p className='text-sm font-semibold tracking-[0.12em] text-slate-700/80 uppercase dark:text-white/65'>
-          {t('AI infrastructure for teams')}
-        </p>
         <h2
           id='home-capabilities-title'
-          className='mt-2 text-xl leading-tight font-semibold tracking-tight text-slate-950 sm:text-2xl dark:text-white'
+          className='text-[1.65rem] leading-[1.15] font-semibold tracking-normal text-slate-950 sm:text-[2rem] dark:text-white'
         >
           {t(
             'A unified AI model platform for enterprise R&D and research teams'
           )}
         </h2>
-        <p className='mt-2 max-w-lg text-sm leading-6 text-slate-700/85 sm:text-[15px] dark:text-white/65'>
+        <p className='mt-3 max-w-lg text-sm leading-6 text-slate-700/85 sm:text-[15px] dark:text-white/65'>
           {t(
             'Connect leading models through one API, then manage members, keys, usage, and spend in one place.'
           )}
         </p>
       </div>
 
+      {props.actions ? (
+        <div className='mt-6 flex flex-wrap items-center gap-3'>
+          {props.actions}
+        </div>
+      ) : null}
+
       <ul
         aria-label={t('Platform capabilities')}
-        className='mt-4 grid grid-cols-2 gap-2.5 max-[374px]:grid-cols-1 sm:gap-3'
+        className='mt-6 grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2'
       >
         {capabilities.map((capability) => {
           const tone = CAPABILITY_TONES[capability.tone]
@@ -159,12 +167,12 @@ export function HeroCapabilities() {
             <li
               key={capability.id}
               data-home-capability={capability.id}
-              className='group relative flex h-[5.75rem] min-h-0 flex-col justify-between overflow-hidden rounded-xl border border-slate-900/10 bg-white/45 p-3 backdrop-blur-[2px] transition-colors duration-300 hover:bg-white/65 max-sm:bg-white/80 sm:h-24 sm:p-3.5 dark:border-white/15 dark:bg-white/[0.045] dark:hover:bg-white/[0.08] dark:max-sm:bg-white/[0.11]'
+              className='group relative flex min-h-[4.5rem] min-w-0 items-start gap-2.5 border-t border-slate-900/10 pt-3 transition-colors duration-300 dark:border-white/15'
             >
-              <div className='flex min-w-0 items-center gap-2.5'>
+              <div className='flex min-w-0 shrink-0 items-center gap-2.5'>
                 <span
                   className={cn(
-                    'flex size-8 shrink-0 items-center justify-center rounded-lg border transition-colors duration-300',
+                    'flex size-8 shrink-0 items-center justify-center rounded-lg border bg-white/35 transition-colors duration-300 dark:bg-white/[0.04]',
                     tone.iconFrame
                   )}
                 >
@@ -175,17 +183,19 @@ export function HeroCapabilities() {
                     strokeWidth={1.8}
                   />
                 </span>
-                <h3 className='line-clamp-2 min-w-0 text-[13px] leading-tight font-semibold text-slate-900 sm:text-sm dark:text-white'>
+              </div>
+              <div className='min-w-0 pt-0.5'>
+                <h3 className='line-clamp-2 text-[13px] leading-tight font-semibold tracking-normal text-slate-900 sm:text-sm dark:text-white'>
                   {capability.title}
                 </h3>
+                <p className='mt-1 line-clamp-2 text-[11px] leading-4 text-slate-600 sm:text-xs dark:text-white/55'>
+                  {capability.description}
+                </p>
               </div>
-              <p className='mt-2 line-clamp-2 text-[11px] leading-4 text-slate-600 sm:text-xs dark:text-white/55'>
-                {capability.description}
-              </p>
               <span
                 aria-hidden='true'
                 className={cn(
-                  'absolute inset-x-0 bottom-0 h-px opacity-0 transition-opacity duration-300 group-hover:opacity-100',
+                  'absolute left-0 top-3 h-8 w-0.5 rounded-full opacity-70 transition-opacity duration-300 group-hover:opacity-100',
                   tone.accent
                 )}
               />
@@ -196,7 +206,7 @@ export function HeroCapabilities() {
 
       <div
         data-home-workflows
-        className='mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-600/90 dark:text-white/55'
+        className='mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-600/90 dark:text-white/55'
       >
         <span className='font-medium text-slate-800 dark:text-white/75'>
           {t('Built for')}

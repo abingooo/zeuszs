@@ -25,6 +25,7 @@ import { useTheme } from '@/context/theme-provider'
 import { useStatus } from '@/hooks/use-status'
 import { cn } from '@/lib/utils'
 
+import { HeroCapabilities } from '../hero-capabilities'
 import { OrbitalBrandLockup } from '../orbital-brand-lockup'
 import { OrbitalEarthPoster, OrbitalEarthScene } from '../orbital-earth-scene'
 
@@ -34,7 +35,7 @@ interface HeroProps {
 }
 
 const HERO_FRAME_CLASSNAME =
-  'relative isolate h-svh min-h-[34rem] overflow-hidden bg-[#edf3f7] text-slate-950 transition-colors duration-500 dark:bg-[#121a27] dark:text-white'
+  'relative isolate h-svh min-h-svh max-md:h-auto overflow-hidden bg-[#edf3f7] text-slate-950 transition-colors duration-500 dark:bg-[#121a27] dark:text-white'
 
 export function HeroLoadingShell() {
   const { resolvedTheme } = useTheme()
@@ -131,13 +132,15 @@ export function Hero(props: HeroProps) {
           </div>
 
           <p
-            className='landing-animate-fade-up mt-5 max-w-md text-[11px] leading-5 text-slate-600 opacity-0 sm:text-xs dark:text-white/42'
+            className='landing-animate-fade-up mt-5 max-w-lg text-sm leading-6 text-slate-600 opacity-0 sm:text-[15px] dark:text-white/42'
             style={{ animationDelay: '360ms' }}
           >
             {t(
               'Supports one-click configuration and perfectly adapts to NewAPI multi-protocol configuration.'
             )}
           </p>
+
+          <HeroCapabilities />
         </div>
       </div>
     </section>

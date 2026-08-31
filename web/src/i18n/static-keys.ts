@@ -173,6 +173,20 @@ export const STATIC_I18N_KEYS = [
   'Technical Support',
   'Professional team providing 24/7 technical support',
 
+  // Home hero capabilities (constants-driven labels)
+  'Unified API',
+  'One endpoint for leading models',
+  'Team controls',
+  'Members, roles, and usage in one place',
+  'Clear billing',
+  'Quota-aware RMB billing',
+  'Protected access',
+  'Scoped keys and secure access',
+  'Literature review',
+  'Code and data',
+  'Paper writing',
+  'Team collaboration',
+
   // User management (interpolated keys)
   'Remaining Quota ({{currency}})',
   'Enter quota in tokens',

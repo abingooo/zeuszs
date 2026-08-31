@@ -110,8 +110,29 @@ describe('orbital Earth hero', () => {
       screen.getByRole('heading', { level: 1, name: 'ZEUSZS' })
     ).toBeVisible()
     expect(container.querySelector('[data-home-hero]')).toHaveClass('h-svh')
+    expect(container.querySelector('[data-home-hero]')).toHaveClass(
+      'max-md:h-auto'
+    )
     expect(container.querySelector('[data-home-hero]')).not.toHaveClass(
       'h-[calc(100svh-4rem)]'
+    )
+  })
+
+  test('fills the hero information panel with localized platform capabilities', () => {
+    const { container } = render(<Hero isAuthenticated={false} />)
+
+    const capabilities = container.querySelector('[data-home-capabilities]')
+    expect(capabilities).toBeVisible()
+    expect(capabilities).toHaveTextContent('AI infrastructure for teams')
+    expect(capabilities).toHaveTextContent('Unified API')
+    expect(capabilities).toHaveTextContent('Team controls')
+    expect(capabilities).toHaveTextContent('Clear billing')
+    expect(capabilities).toHaveTextContent('Protected access')
+    expect(
+      capabilities?.querySelectorAll('[data-home-capability]')
+    ).toHaveLength(4)
+    expect(capabilities?.querySelectorAll('[data-home-workflow]')).toHaveLength(
+      4
     )
   })
 
@@ -127,6 +148,19 @@ describe('orbital Earth hero', () => {
     ).toBeVisible()
   })
 
+  test('localizes the capability panel after switching to Simplified Chinese', async () => {
+    render(<Hero isAuthenticated={false} />)
+
+    await act(async () => {
+      await i18next.changeLanguage('zhCN')
+    })
+
+    const capabilities = document.querySelector('[data-home-capabilities]')
+    expect(capabilities).toHaveTextContent('面向团队的 AI 基础设施')
+    expect(capabilities).toHaveTextContent('统一 API')
+    expect(capabilities).toHaveTextContent('文献研读')
+  })
+
   test('uses the same original-logo brand lockup in the loading shell', () => {
     const { container } = render(<HeroLoadingShell />)
 
@@ -135,6 +169,7 @@ describe('orbital Earth hero', () => {
       container.querySelector('[data-orbital-brand-lockup]')
     )
     expect(loadingHero).toHaveClass('h-svh')
+    expect(loadingHero).toHaveClass('max-md:h-auto')
     expect(loadingHero).not.toHaveClass('h-[calc(100svh-4rem)]')
     expect(
       screen.getByRole('heading', { level: 1, name: 'ZEUSZS' })

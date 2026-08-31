@@ -134,10 +134,10 @@ export function HeroCapabilities(props: HeroCapabilitiesProps) {
       className='landing-animate-fade-up mt-7 w-full max-w-2xl opacity-0 max-sm:-mx-3 max-sm:rounded-2xl max-sm:bg-white/60 max-sm:p-3 max-sm:backdrop-blur-[2px] dark:max-sm:bg-[#121a27]/70'
       style={{ animationDelay: '240ms' }}
     >
-      <div className='max-w-xl'>
+      <div className='max-w-2xl'>
         <h2
           id='home-capabilities-title'
-          className='text-[1.65rem] leading-[1.15] font-semibold tracking-normal text-slate-950 sm:text-[2rem] dark:text-white'
+          className='text-[1.65rem] leading-[1.15] font-semibold tracking-normal text-pretty text-slate-950 sm:text-[2rem] dark:text-white'
         >
           {t(
             'A unified AI model platform for enterprise R&D and research teams'

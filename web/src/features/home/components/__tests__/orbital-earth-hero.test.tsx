@@ -142,6 +142,15 @@ describe('orbital Earth hero', () => {
     )
   })
 
+  test('keeps the capability heading wide and readable across line wraps', () => {
+    const { container } = render(<Hero isAuthenticated={false} />)
+
+    const heading = container.querySelector('[data-home-capabilities] h2')
+
+    expect(heading).toHaveClass('text-pretty')
+    expect(heading?.parentElement).toHaveClass('max-w-2xl')
+  })
+
   test('updates the page heading to 宙斯智算 after switching to Simplified Chinese', async () => {
     render(<Hero isAuthenticated={false} />)
 

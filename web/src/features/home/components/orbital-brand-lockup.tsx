@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useTranslation } from 'react-i18next'
 
+import { useSystemConfig } from '@/hooks/use-system-config'
 import { normalizeInterfaceLanguage } from '@/i18n/languages'
 import { cn } from '@/lib/utils'
 
@@ -27,10 +28,12 @@ type OrbitalBrandLockupProps = {
 
 export function OrbitalBrandLockup(props: OrbitalBrandLockupProps) {
   const { i18n, t } = useTranslation()
+  const { systemName, loading } = useSystemConfig()
   const language = normalizeInterfaceLanguage(
     i18n.resolvedLanguage || i18n.language
   )
   const isChinese = language === 'zhCN'
+  const displayName = loading ? t('ZEUSZS') : systemName
 
   return (
     <h1
@@ -56,7 +59,7 @@ export function OrbitalBrandLockup(props: OrbitalBrandLockupProps) {
         data-brand-wordmark={language}
         className='font-inter block min-w-0 shrink text-[2.5rem] leading-none font-semibold tracking-normal whitespace-nowrap sm:text-[3.5rem] lg:text-[4.25rem]'
       >
-        {t('ZEUSZS')}
+        {displayName}
       </span>
     </h1>
   )

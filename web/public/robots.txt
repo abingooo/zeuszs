@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /v1/
+Disallow: /mj/
+Disallow: /pg/
+
+Sitemap: https://zeuszs.ai/sitemap.xml

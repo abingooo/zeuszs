@@ -7,6 +7,10 @@
 🍥 **Next-Generation LLM Gateway and AI Asset Management System**
 
 <p align="center">
+  <a href="https://zeuszs.ai"><strong>宙斯智算 ZEUSZS Official Site</strong></a>
+</p>
+
+<p align="center">
   <a href="./README.zh_CN.md">简体中文</a> |
   <a href="./README.zh_TW.md">繁體中文</a> |
   <strong>English</strong> |

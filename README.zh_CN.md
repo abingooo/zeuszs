@@ -7,6 +7,10 @@
 🍥 **新一代大模型网关与AI资产管理系统**
 
 <p align="center">
+  <a href="https://zeuszs.ai"><strong>宙斯智算 ZEUSZS 官方网站</strong></a>
+</p>
+
+<p align="center">
   简体中文 |
   <a href="./README.zh_TW.md">繁體中文</a> |
   <a href="./README.md">English</a> |

@@ -114,6 +114,7 @@ const rootElement = document.querySelector<HTMLElement>('#root')
 if (!rootElement) {
   throw new Error('Root element not found')
 }
+document.querySelector<HTMLElement>('[data-seo-shell]')?.remove()
 // Set document.title and favicon from cached status, then refresh from network
 ;(function initSystemBranding() {
   try {

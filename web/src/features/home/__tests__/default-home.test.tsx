@@ -119,7 +119,9 @@ describe('default home content routing', () => {
     expect(layout).toHaveAttribute('data-header-custom-logo', 'false')
     expect(layout).toHaveAttribute('data-header-custom-name', 'false')
     expect(screen.getByRole('heading', { name: 'ZEUSZS' })).toBeVisible()
-    expect(loadingHero?.querySelector('picture')).toBeInTheDocument()
+    expect(
+      loadingHero?.querySelector('[data-home-space-background]')
+    ).toHaveAttribute('aria-hidden', 'true')
     expect(document.querySelector('[data-home-hero]')).not.toBeInTheDocument()
   })
 

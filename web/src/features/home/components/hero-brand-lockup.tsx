@@ -22,11 +22,11 @@ import { useSystemConfig } from '@/hooks/use-system-config'
 import { normalizeInterfaceLanguage } from '@/i18n/languages'
 import { cn } from '@/lib/utils'
 
-type OrbitalBrandLockupProps = {
+type HeroBrandLockupProps = {
   className?: string
 }
 
-export function OrbitalBrandLockup(props: OrbitalBrandLockupProps) {
+export function HeroBrandLockup(props: HeroBrandLockupProps) {
   const { i18n, t } = useTranslation()
   const { systemName, loading } = useSystemConfig()
   const language = normalizeInterfaceLanguage(
@@ -37,7 +37,7 @@ export function OrbitalBrandLockup(props: OrbitalBrandLockupProps) {
 
   return (
     <h1
-      data-orbital-brand-lockup
+      data-hero-brand-lockup
       data-brand-language={language}
       lang={isChinese ? 'zh-CN' : 'en'}
       className={cn(
@@ -53,11 +53,11 @@ export function OrbitalBrandLockup(props: OrbitalBrandLockupProps) {
         width='512'
         height='512'
         draggable='false'
-        className='size-14 shrink-0 object-contain sm:size-[4.5rem] lg:size-20'
+        className='size-14 shrink-0 object-contain sm:size-[4.75rem] lg:size-[5.5rem]'
       />
       <span
         data-brand-wordmark={language}
-        className='font-inter block min-w-0 shrink text-[2.5rem] leading-none font-semibold tracking-normal whitespace-nowrap sm:text-[3.5rem] lg:text-[4.25rem]'
+        className='font-inter block min-w-0 shrink text-[2.75rem] leading-none font-semibold tracking-normal text-balance [overflow-wrap:anywhere] sm:text-[3.75rem] lg:text-[4.5rem]'
       >
         {displayName}
       </span>

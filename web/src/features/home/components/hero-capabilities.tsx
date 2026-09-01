@@ -15,18 +15,19 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
 import {
+  Analytics01Icon,
   ApiGatewayIcon,
   ReceiptTextIcon,
+  Route01Icon,
   SecurityIcon,
   UserGroupIcon,
 } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon, type IconSvgElement } from '@hugeicons/react'
-import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { cn } from '@/lib/utils'
 
-type CapabilityTone = 'blue' | 'green' | 'amber' | 'cyan'
+type CapabilityTone = 'blue' | 'green' | 'amber' | 'cyan' | 'indigo' | 'rose'
 
 type Capability = {
   id: string
@@ -42,31 +43,50 @@ const CAPABILITY_TONES: Record<
     icon: string
     iconFrame: string
     accent: string
+    title: string
   }
 > = {
   blue: {
     icon: 'text-sky-700 dark:text-sky-300',
     iconFrame:
-      'border-sky-500/25 bg-sky-500/10 group-hover:border-sky-500/40 group-hover:bg-sky-500/15',
+      'border-sky-500/25 bg-sky-500/10 group-hover/capability:border-sky-500/40 group-hover/capability:bg-sky-500/15',
     accent: 'bg-sky-500/70',
+    title: 'text-sky-700 dark:text-sky-300',
   },
   green: {
     icon: 'text-emerald-700 dark:text-emerald-300',
     iconFrame:
-      'border-emerald-500/25 bg-emerald-500/10 group-hover:border-emerald-500/40 group-hover:bg-emerald-500/15',
+      'border-emerald-500/25 bg-emerald-500/10 group-hover/capability:border-emerald-500/40 group-hover/capability:bg-emerald-500/15',
     accent: 'bg-emerald-500/70',
+    title: 'text-emerald-700 dark:text-emerald-300',
   },
   amber: {
     icon: 'text-amber-700 dark:text-amber-300',
     iconFrame:
-      'border-amber-500/25 bg-amber-500/10 group-hover:border-amber-500/40 group-hover:bg-amber-500/15',
+      'border-amber-500/25 bg-amber-500/10 group-hover/capability:border-amber-500/40 group-hover/capability:bg-amber-500/15',
     accent: 'bg-amber-500/70',
+    title: 'text-amber-700 dark:text-amber-300',
   },
   cyan: {
     icon: 'text-cyan-700 dark:text-cyan-300',
     iconFrame:
-      'border-cyan-500/25 bg-cyan-500/10 group-hover:border-cyan-500/40 group-hover:bg-cyan-500/15',
+      'border-cyan-500/25 bg-cyan-500/10 group-hover/capability:border-cyan-500/40 group-hover/capability:bg-cyan-500/15',
     accent: 'bg-cyan-500/70',
+    title: 'text-cyan-700 dark:text-cyan-300',
+  },
+  indigo: {
+    icon: 'text-indigo-700 dark:text-indigo-300',
+    iconFrame:
+      'border-indigo-500/25 bg-indigo-500/10 group-hover/capability:border-indigo-500/40 group-hover/capability:bg-indigo-500/15',
+    accent: 'bg-indigo-500/70',
+    title: 'text-indigo-700 dark:text-indigo-300',
+  },
+  rose: {
+    icon: 'text-rose-700 dark:text-rose-300',
+    iconFrame:
+      'border-rose-500/25 bg-rose-500/10 group-hover/capability:border-rose-500/40 group-hover/capability:bg-rose-500/15',
+    accent: 'bg-rose-500/70',
+    title: 'text-rose-700 dark:text-rose-300',
   },
 }
 
@@ -79,6 +99,14 @@ const CAPABILITY_DEFINITIONS = [
     tone: 'blue',
   },
   {
+    id: 'routing',
+    title: 'Intelligent routing',
+    description:
+      'Match channels by model and group, then route by priority and weight',
+    icon: Route01Icon,
+    tone: 'indigo',
+  },
+  {
     id: 'teams',
     title: 'Team controls',
     description: 'Members, roles, and usage in one place',
@@ -86,9 +114,16 @@ const CAPABILITY_DEFINITIONS = [
     tone: 'green',
   },
   {
+    id: 'insights',
+    title: 'Usage insights',
+    description: 'Clear views of requests, tokens, and cost trends',
+    icon: Analytics01Icon,
+    tone: 'rose',
+  },
+  {
     id: 'billing',
     title: 'Clear billing',
-    description: 'Quota-aware RMB billing',
+    description: 'Quota billing with corporate invoices',
     icon: ReceiptTextIcon,
     tone: 'amber',
   },
@@ -107,18 +142,40 @@ const CAPABILITY_DEFINITIONS = [
   tone: CapabilityTone
 }>
 
-const WORKFLOW_KEYS = [
-  'Literature review',
-  'Code and data',
-  'Paper writing',
-  'Team collaboration',
+const USE_CASES = [
+  {
+    id: 'agents',
+    label: 'Intelligent agents',
+    marker: 'bg-sky-500/75',
+    text: 'text-sky-700 dark:text-sky-300',
+  },
+  {
+    id: 'code',
+    label: 'Code development',
+    marker: 'bg-emerald-500/75',
+    text: 'text-emerald-700 dark:text-emerald-300',
+  },
+  {
+    id: 'writing',
+    label: 'Content writing',
+    marker: 'bg-rose-500/75',
+    text: 'text-rose-700 dark:text-rose-300',
+  },
+  {
+    id: 'documents',
+    label: 'Document organization',
+    marker: 'bg-amber-500/75',
+    text: 'text-amber-700 dark:text-amber-300',
+  },
+  {
+    id: 'analysis',
+    label: 'Data analysis',
+    marker: 'bg-cyan-500/75',
+    text: 'text-cyan-700 dark:text-cyan-300',
+  },
 ] as const
 
-type HeroCapabilitiesProps = {
-  actions?: ReactNode
-}
-
-export function HeroCapabilities(props: HeroCapabilitiesProps) {
+export function HeroCapabilities() {
   const { t } = useTranslation()
 
   const capabilities: Capability[] = CAPABILITY_DEFINITIONS.map((item) => ({
@@ -129,36 +186,14 @@ export function HeroCapabilities(props: HeroCapabilitiesProps) {
 
   return (
     <section
-      aria-labelledby='home-capabilities-title'
+      aria-label={t('Platform capabilities')}
       data-home-capabilities
-      className='landing-animate-fade-up mt-7 w-full max-w-2xl opacity-0 max-sm:-mx-3 max-sm:rounded-2xl max-sm:bg-white/60 max-sm:p-3 max-sm:backdrop-blur-[2px] dark:max-sm:bg-[#121a27]/70'
-      style={{ animationDelay: '240ms' }}
+      className='landing-animate-fade-up mx-auto w-full max-w-5xl min-w-0 opacity-0 [animation-delay:240ms]'
     >
-      <div className='max-w-2xl'>
-        <h2
-          id='home-capabilities-title'
-          className='text-[1.65rem] leading-[1.15] font-semibold tracking-normal text-pretty text-slate-950 sm:text-[2rem] dark:text-white'
-        >
-          {t(
-            'A unified AI model platform for enterprise R&D and research teams'
-          )}
-        </h2>
-        <p className='mt-3 max-w-lg text-sm leading-6 text-slate-700/85 sm:text-[15px] dark:text-white/65'>
-          {t(
-            'Connect leading models through one API, then manage members, keys, usage, and spend in one place.'
-          )}
-        </p>
-      </div>
-
-      {props.actions ? (
-        <div className='mt-6 flex flex-wrap items-center gap-3'>
-          {props.actions}
-        </div>
-      ) : null}
-
       <ul
         aria-label={t('Platform capabilities')}
-        className='mt-6 grid grid-cols-1 gap-x-6 gap-y-3 sm:grid-cols-2'
+        data-home-capability-grid
+        className='grid auto-rows-fr grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
       >
         {capabilities.map((capability) => {
           const tone = CAPABILITY_TONES[capability.tone]
@@ -167,35 +202,41 @@ export function HeroCapabilities(props: HeroCapabilitiesProps) {
             <li
               key={capability.id}
               data-home-capability={capability.id}
-              className='group relative flex min-h-[4.5rem] min-w-0 items-start gap-2.5 border-t border-slate-900/10 pt-3 transition-colors duration-300 dark:border-white/15'
+              data-home-glass-tile
+              className='group/capability border-border/70 bg-background/80 hover:border-border hover:bg-background/95 supports-[backdrop-filter]:bg-background/60 relative flex min-h-28 min-w-0 items-center gap-4 overflow-hidden rounded-lg border p-4 shadow-[0_18px_50px_-34px_rgba(15,23,42,0.5)] backdrop-blur-lg transition-[transform,border-color,background-color,box-shadow] duration-300 hover:shadow-[0_24px_58px_-30px_rgba(15,23,42,0.55)] motion-safe:hover:-translate-y-1 motion-reduce:transform-none motion-reduce:transition-none sm:h-full sm:p-5'
             >
-              <div className='flex min-w-0 shrink-0 items-center gap-2.5'>
-                <span
+              <span
+                className={cn(
+                  'bg-background/65 relative z-10 flex size-10 shrink-0 items-center justify-center rounded-lg border shadow-sm transition-[transform,border-color,background-color,box-shadow] duration-200 group-hover/capability:shadow-md motion-reduce:transform-none motion-reduce:transition-none motion-safe:group-hover/capability:scale-105',
+                  tone.iconFrame
+                )}
+              >
+                <HugeiconsIcon
+                  icon={capability.icon}
+                  aria-hidden='true'
+                  className={cn('size-[1.1rem]', tone.icon)}
+                  strokeWidth={1.8}
+                />
+              </span>
+
+              <div className='relative z-10 min-w-0 flex-1'>
+                <h3
                   className={cn(
-                    'flex size-8 shrink-0 items-center justify-center rounded-lg border bg-white/35 transition-colors duration-300 dark:bg-white/[0.04]',
-                    tone.iconFrame
+                    'text-base leading-tight font-semibold tracking-normal break-words sm:text-lg',
+                    tone.title
                   )}
                 >
-                  <HugeiconsIcon
-                    icon={capability.icon}
-                    aria-hidden='true'
-                    className={cn('size-[1.1rem]', tone.icon)}
-                    strokeWidth={1.8}
-                  />
-                </span>
-              </div>
-              <div className='min-w-0 pt-0.5'>
-                <h3 className='line-clamp-2 text-[13px] leading-tight font-semibold tracking-normal text-slate-900 sm:text-sm dark:text-white'>
                   {capability.title}
                 </h3>
-                <p className='mt-1 line-clamp-2 text-[11px] leading-4 text-slate-600 sm:text-xs dark:text-white/55'>
+                <p className='text-muted-foreground mt-1 text-sm leading-6 break-words sm:text-[15px]'>
                   {capability.description}
                 </p>
               </div>
+
               <span
                 aria-hidden='true'
                 className={cn(
-                  'absolute left-0 top-3 h-8 w-0.5 rounded-full opacity-70 transition-opacity duration-300 group-hover:opacity-100',
+                  'absolute top-4 left-0 h-8 w-0.5 rounded-full opacity-70 transition-[height,opacity] duration-200 group-hover/capability:h-11 group-hover/capability:opacity-100 motion-reduce:transition-none sm:top-5',
                   tone.accent
                 )}
               />
@@ -204,29 +245,29 @@ export function HeroCapabilities(props: HeroCapabilitiesProps) {
         })}
       </ul>
 
-      <div
-        data-home-workflows
-        className='mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-600/90 dark:text-white/55'
-      >
-        <span className='font-medium text-slate-800 dark:text-white/75'>
-          {t('Built for')}
-        </span>
-        {WORKFLOW_KEYS.map((workflow, index) => (
-          <span
-            key={workflow}
-            data-home-workflow={index}
-            className='inline-flex items-center gap-1.5'
-          >
-            <span
-              aria-hidden='true'
+      <div data-home-use-cases className='border-border/60 mt-6 border-t pt-5'>
+        <ul
+          aria-label={t('Application scenarios')}
+          data-home-use-case-list
+          className='flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm leading-5 sm:text-[15px]'
+        >
+          {USE_CASES.map((useCase) => (
+            <li
+              key={useCase.id}
+              data-home-use-case={useCase.id}
               className={cn(
-                'size-1.5 rounded-full',
-                index % 2 === 0 ? 'bg-sky-500/80' : 'bg-amber-500/80'
+                'inline-flex items-center gap-1.5 font-medium',
+                useCase.text
               )}
-            />
-            {t(workflow)}
-          </span>
-        ))}
+            >
+              <span
+                aria-hidden='true'
+                className={cn('size-1.5 rounded-full', useCase.marker)}
+              />
+              {t(useCase.label)}
+            </li>
+          ))}
+        </ul>
       </div>
     </section>
   )

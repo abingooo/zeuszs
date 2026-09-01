@@ -530,6 +530,45 @@ For commercial licensing, please contact support@quantumnous.com
   animation: landing-fade-right 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+.home-space-stars {
+  width: 2px;
+  height: 2px;
+  background: currentColor;
+}
+
+.home-space-stars-near {
+  box-shadow:
+    7vw 13vh 0 currentColor,
+    18vw 82vh 0 currentColor,
+    31vw 21vh 0 currentColor,
+    46vw 68vh 0 currentColor,
+    58vw 14vh 0 currentColor,
+    67vw 43vh 0 currentColor,
+    78vw 76vh 0 currentColor,
+    91vw 26vh 0 currentColor,
+    96vw 61vh 0 currentColor,
+    39vw 91vh 0 currentColor,
+    84vw 8vh 0 currentColor;
+}
+
+.home-space-stars-far {
+  width: 1px;
+  height: 1px;
+  box-shadow:
+    4vw 54vh 0 currentColor,
+    13vw 34vh 0 currentColor,
+    23vw 7vh 0 currentColor,
+    28vw 73vh 0 currentColor,
+    37vw 47vh 0 currentColor,
+    51vw 29vh 0 currentColor,
+    62vw 87vh 0 currentColor,
+    71vw 18vh 0 currentColor,
+    74vw 58vh 0 currentColor,
+    87vw 39vh 0 currentColor,
+    94vw 92vh 0 currentColor,
+    99vw 4vh 0 currentColor;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .landing-animate-fade-up,
   .landing-animate-fade-in,

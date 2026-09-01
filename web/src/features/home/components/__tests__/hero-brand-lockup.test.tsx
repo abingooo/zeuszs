@@ -23,7 +23,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest'
 import en from '@/i18n/locales/en.json'
 import zhCN from '@/i18n/locales/zh.json'
 
-import { OrbitalBrandLockup } from '../orbital-brand-lockup'
+import { HeroBrandLockup } from '../hero-brand-lockup'
 
 describe('ZEUSZS brand lockup', () => {
   beforeEach(async () => {
@@ -45,7 +45,7 @@ describe('ZEUSZS brand lockup', () => {
   })
 
   test('shows the original ZEUSZS logo with a clean English text wordmark', () => {
-    const { container } = render(<OrbitalBrandLockup />)
+    const { container } = render(<HeroBrandLockup />)
 
     const heading = screen.getByRole('heading', {
       level: 1,
@@ -69,7 +69,7 @@ describe('ZEUSZS brand lockup', () => {
   })
 
   test('switches to a clean Chinese text wordmark when the interface language changes', async () => {
-    const { container } = render(<OrbitalBrandLockup />)
+    const { container } = render(<HeroBrandLockup />)
 
     await act(async () => {
       await i18next.changeLanguage('zhCN')
@@ -90,7 +90,7 @@ describe('ZEUSZS brand lockup', () => {
   })
 
   test('uses normal text without custom glyph geometry or effects', () => {
-    const { container } = render(<OrbitalBrandLockup />)
+    const { container } = render(<HeroBrandLockup />)
 
     expect(container.querySelector('svg')).not.toBeInTheDocument()
     expect(container.querySelector('path')).not.toBeInTheDocument()
@@ -99,14 +99,5 @@ describe('ZEUSZS brand lockup', () => {
       'font-semibold',
       'tracking-normal'
     )
-  })
-
-  test('does not render the synthesized orbital Z mark', () => {
-    const { container } = render(<OrbitalBrandLockup />)
-
-    expect(container.querySelector('[data-brand-part="z"]')).toBeNull()
-    expect(container.querySelector('[data-brand-part="orbit"]')).toBeNull()
-    expect(container.querySelector('[data-brand-part="node"]')).toBeNull()
-    expect(container.querySelector('[data-orbit-motion]')).toBeNull()
   })
 })
